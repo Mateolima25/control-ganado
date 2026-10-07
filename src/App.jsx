@@ -160,6 +160,16 @@ function App() {
     setPage("lots");
   };
 
+  const deleteWeighing = (id) => {
+    const weighing = data.weighings.find((row) => row.id === id);
+    if (!weighing) return;
+    if (!confirm(`¿Eliminar el pesaje de la caravana ${weighing.caravana} (${weighing.weight} kg)?`)) return;
+    setData((prev) => ({
+      ...prev,
+      weighings: prev.weighings.filter((row) => row.id !== id),
+    }));
+  };
+
   const importWeights = async (file, lotId) => {
     const rows = await readSpreadsheet(file);
     const mapped = mapWeightRows(rows);
@@ -280,6 +290,7 @@ function App() {
             search={search}
             importWeights={importWeights}
             importFeed={importFeed}
+            deleteWeighing={deleteWeighing}
             deleteLot={deleteLot}
             setPage={setPage}
           />
@@ -537,7 +548,7 @@ function Caravanas({ data, search, goLot }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteLot, setPage }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteLot, setPage }) {
   const [tab, setTab] = useState("summary");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
   const feeds = data.feedings.filter((f) => f.lotId === lot.id);
@@ -658,9 +669,24 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteLot, se
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th><th>Acciones</th></tr></thead>
                 <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
-                  <tr key={w.id}><td>{formatDate(w.date)}</td><td><b>{w.caravana}</b></td><td>{w.weight.toFixed(1)} kg</td></tr>
+                  <tr key={w.id}>
+                    <td>{formatDate(w.date)}</td>
+                    <td><b>{w.caravana}</b></td>
+                    <td>{w.weight.toFixed(1)} kg</td>
+                    <td className="actions">
+                      <button
+                        type="button"
+                        className="danger-icon"
+                        title="Eliminar este pesaje"
+                        aria-label={`Eliminar pesaje de la caravana ${w.caravana}`}
+                        onClick={() => deleteWeighing(w.id)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
+                  </tr>
                 ))}</tbody>
               </table>
             </div>
