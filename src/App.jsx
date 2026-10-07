@@ -144,6 +144,8 @@ function App() {
   const [page, setPage] = useState("dashboard");
   const [selectedLotId, setSelectedLotId] = useState(null);
   const [selectedCaravana, setSelectedCaravana] = useState(null);
+  const [animalReturnPage, setAnimalReturnPage] = useState("caravanas");
+  const [animalReturnTab, setAnimalReturnTab] = useState("summary");
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
   const lastSyncedData = useRef("");
@@ -309,10 +311,12 @@ function App() {
     setPage("lot");
   };
 
-  const openCaravana = (caravana) => {
+  const openCaravana = (caravana, returnPage = "caravanas", returnTab = "summary") => {
     setSelectedCaravana(caravana);
+    setAnimalReturnPage(returnPage);
+    setAnimalReturnTab(returnTab);
     setSearch("");
-    setPage("caravanas");
+    setPage("animal");
   };
 
   const addLot = (lot) => {
@@ -470,6 +474,7 @@ function App() {
               {page === "lots" && "Lotes"}
               {page === "caravanas" && "Caravanas"}
               {page === "lot" && selectedLot?.name}
+              {page === "animal" && `Caravana ${selectedCaravana || ""}`}
             </h1>
             <p>
               {page === "dashboard"
@@ -478,10 +483,12 @@ function App() {
                 ? "Administra los lotes y sus pesajes."
                 : page === "caravanas"
                 ? "Seguimiento individual de cada animal, aunque cambie de lote."
+                    : page === "animal"
+                    ? "Historial completo de pesajes y lotes de este animal."
                 : "Pesajes, caravanas, alimentación y evolución."}
             </p>
           </div>
-          {page !== "dashboard" && (
+                  {page !== "dashboard" && page !== "animal" && (
             <div className="search-box">
               <Search size={17} />
               <input
@@ -508,8 +515,16 @@ function App() {
             data={data}
             search={search}
             goLot={goLot}
-            selectedCaravana={selectedCaravana}
-            setSelectedCaravana={setSelectedCaravana}
+            openCaravana={openCaravana}
+          />
+        )}
+
+        {page === "animal" && selectedCaravana && (
+          <AnimalDetail
+            data={data}
+            caravana={selectedCaravana}
+            goLot={goLot}
+            onBack={() => setPage(animalReturnPage)}
           />
         )}
 
@@ -526,6 +541,7 @@ function App() {
             setPage={setPage}
             goLot={goLot}
             openCaravana={openCaravana}
+            initialTab={page === "lot" ? animalReturnTab : "summary"}
             canEdit={isOwner}
           />
         )}
@@ -702,7 +718,7 @@ function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
   );
 }
 
-function Caravanas({ data, search, goLot, selectedCaravana, setSelectedCaravana }) {
+function Caravanas({ data, search, goLot, openCaravana }) {
   const animals = useMemo(() => {
     const grouped = new Map();
     const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
@@ -736,7 +752,6 @@ function Caravanas({ data, search, goLot, selectedCaravana, setSelectedCaravana 
       .sort((a, b) => b.currentWeight - a.currentWeight);
   }, [data.lots, data.weighings, search]);
 
-  const selectedAnimal = animals.find((animal) => animal.caravana === selectedCaravana) || animals[0];
   const avgWeight = animals.length
     ? animals.reduce((sum, animal) => sum + animal.currentWeight, 0) / animals.length
     : 0;
@@ -744,12 +759,6 @@ function Caravanas({ data, search, goLot, selectedCaravana, setSelectedCaravana 
   const avgDaily = animalsWithDaily.length
     ? animalsWithDaily.reduce((sum, animal) => sum + animal.daily, 0) / animalsWithDaily.length
     : 0;
-  const chartData = selectedAnimal?.history.map((weighing) => ({
-    date: formatDate(weighing.date),
-    weight: weighing.weight,
-    lotName: weighing.lotName,
-  }));
-
   return (
     <div className="content">
       <div className="section-title">
@@ -773,8 +782,8 @@ function Caravanas({ data, search, goLot, selectedCaravana, setSelectedCaravana 
               <table>
                 <thead><tr><th>Caravana</th><th>Pesajes</th><th>Desde</th><th>Peso inicial</th><th>Peso actual</th><th>Lote actual</th><th>Ganancia</th><th>Kg/día</th></tr></thead>
                 <tbody>{animals.map((animal) => (
-                  <tr key={animal.caravana} className={selectedAnimal?.caravana === animal.caravana ? "selected-row" : ""}>
-                    <td><button className="link-button" aria-pressed={selectedAnimal?.caravana === animal.caravana} onClick={() => setSelectedCaravana(animal.caravana)}>{animal.caravana}</button></td>
+                  <tr key={animal.caravana}>
+                    <td><button className="link-button" onClick={() => openCaravana(animal.caravana)}>{animal.caravana}</button></td>
                     <td>{animal.count}</td>
                     <td>{formatDate(animal.history[0]?.date)}</td>
                     <td>{animal.initialWeight.toFixed(1)} kg</td>
@@ -787,55 +796,88 @@ function Caravanas({ data, search, goLot, selectedCaravana, setSelectedCaravana 
               </table>
             </div>
           </section>
-
-          {selectedAnimal && (
-            <>
-              <section className="panel caravan-evolution">
-                <div className="panel-title">
-                  <div><h3>Evolución de {selectedAnimal.caravana}</h3><span>{selectedAnimal.currentLot} · {selectedAnimal.count} pesajes · {selectedAnimal.days} días de seguimiento</span></div>
-                  <strong className={selectedAnimal.gain >= 0 ? "positive" : "negative"}>{selectedAnimal.gain >= 0 ? "+" : ""}{selectedAnimal.gain.toFixed(1)} kg</strong>
-                </div>
-                <div className="chart"><ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => [`${Number(value).toFixed(1)} kg`, "Peso"]} labelFormatter={(label, payload) => payload?.[0]?.payload?.lotName ? `${label} · ${payload[0].payload.lotName}` : label} />
-                    <Line type="monotone" dataKey="weight" stroke="#7ee29b" strokeWidth={2} dot={{ r: 3 }} />
-                  </LineChart>
-                </ResponsiveContainer></div>
-              </section>
-
-              <section className="panel caravan-history">
-                <div className="panel-title"><h3>Historial y movimientos</h3><span>El lote indicado corresponde a cada pesaje.</span></div>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Fecha</th><th>Peso</th><th>Lote</th><th>Cambio desde pesaje anterior</th></tr></thead>
-                    <tbody>{selectedAnimal.history.slice().reverse().map((weighing, index, history) => {
-                      const previous = history[index + 1];
-                      const change = previous ? weighing.weight - previous.weight : null;
-                      return (
-                        <tr key={weighing.id}>
-                          <td>{formatDate(weighing.date)}</td>
-                          <td><b>{weighing.weight.toFixed(1)} kg</b></td>
-                          <td>{weighing.lotId ? <button className="link-button" onClick={() => goLot(weighing.lotId)}>{weighing.lotName}</button> : weighing.lotName}</td>
-                          <td className={change === null ? "" : change >= 0 ? "positive" : "negative"}>{change === null ? "Primer registro" : `${change >= 0 ? "+" : ""}${change.toFixed(1)} kg`}</td>
-                        </tr>
-                      );
-                    })}</tbody>
-                  </table>
-                </div>
-              </section>
-            </>
-          )}
         </>
       )}
     </div>
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, canEdit }) {
-  const [tab, setTab] = useState("summary");
+function AnimalDetail({ data, caravana, goLot, onBack }) {
+  const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
+  const history = data.weighings
+    .filter((weighing) => weighing.caravana === caravana)
+    .slice()
+    .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+    .map((weighing) => ({
+      ...weighing,
+      lotName: lotNames.get(weighing.lotId) || "Lote no disponible",
+    }));
+  const stats = animalStats(history, caravana);
+  const latest = history[history.length - 1];
+  const chartData = history.map((weighing) => ({
+    date: formatDate(weighing.date),
+    weight: weighing.weight,
+    lotName: weighing.lotName,
+  }));
+
+  return (
+    <div className="content">
+      <button className="back animal-back" onClick={onBack}>← Volver</button>
+      {history.length === 0 ? (
+        <Empty icon={<Beef />} title="No hay pesajes" text="No encontramos historial para esta caravana." />
+      ) : (
+        <>
+          <div className="stats-grid">
+            <Stat icon={<Beef />} label="Lote actual" value={latest?.lotName || "-"} />
+            <Stat icon={<FileSpreadsheet />} label="Pesajes" value={stats.count} />
+            <Stat icon={<Gauge />} label="Peso actual" value={`${stats.currentWeight.toFixed(1)} kg`} />
+            <Stat icon={<CalendarDays />} label="Ganancia total" value={`${stats.gain >= 0 ? "+" : ""}${stats.gain.toFixed(1)} kg`} />
+          </div>
+
+          <section className="panel caravan-evolution">
+            <div className="panel-title">
+              <div><h3>Evolución de {caravana}</h3><span>{stats.days} días de seguimiento</span></div>
+              {latest?.lotId && <button className="link-button" onClick={() => goLot(latest.lotId)}>Abrir lote actual: {latest.lotName}</button>}
+            </div>
+            <div className="chart"><ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip formatter={(value) => [`${Number(value).toFixed(1)} kg`, "Peso"]} labelFormatter={(label, payload) => payload?.[0]?.payload?.lotName ? `${label} · ${payload[0].payload.lotName}` : label} />
+                <Line type="monotone" dataKey="weight" stroke="#7ee29b" strokeWidth={2} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer></div>
+          </section>
+
+          <section className="panel caravan-history">
+            <div className="panel-title"><h3>Historial y movimientos</h3><span>Cada pesaje conserva el lote donde se registró.</span></div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Fecha</th><th>Peso</th><th>Lote</th><th>Cambio desde pesaje anterior</th></tr></thead>
+                <tbody>{history.slice().reverse().map((weighing, index, descendingHistory) => {
+                  const previous = descendingHistory[index + 1];
+                  const change = previous ? weighing.weight - previous.weight : null;
+                  return (
+                    <tr key={weighing.id}>
+                      <td>{formatDate(weighing.date)}</td>
+                      <td><b>{weighing.weight.toFixed(1)} kg</b></td>
+                      <td>{weighing.lotId ? <button className="link-button" onClick={() => goLot(weighing.lotId)}>{weighing.lotName}</button> : weighing.lotName}</td>
+                      <td className={change === null ? "" : change >= 0 ? "positive" : "negative"}>{change === null ? "Primer registro" : `${change >= 0 ? "+" : ""}${change.toFixed(1)} kg`}</td>
+                    </tr>
+                  );
+                })}</tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit }) {
+  const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
   const weightMonths = [...new Set(weights.map((weight) => weight.date?.slice(0, 7)).filter(Boolean))].sort().reverse();
@@ -951,7 +993,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 <thead><tr><th>Caravana</th><th>Lote actual</th><th>Pesajes</th><th>Inicial</th><th>Actual</th><th>Ganancia</th><th>Días</th><th>Ganancia diaria</th></tr></thead>
                 <tbody>{animals.map((a) => (
                   <tr key={a.caravana}>
-                    <td><button className="link-button" onClick={() => openCaravana(a.caravana)}>{a.caravana}</button></td>
+                    <td><button className="link-button" onClick={() => openCaravana(a.caravana, "lot", "animals")}>{a.caravana}</button></td>
                     <td>{a.currentLotId ? <button className="link-button" onClick={() => goLot(a.currentLotId)}>{a.currentLot}</button> : a.currentLot}</td>
                     <td>{a.count}</td>
                     <td>{a.initialWeight.toFixed(1)} kg</td>
@@ -1002,7 +1044,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
                   <tr key={w.id}>
                     <td>{formatDate(w.date)}</td>
-                    <td><button className="link-button" onClick={() => openCaravana(w.caravana)}>{w.caravana}</button></td>
+                    <td><button className="link-button" onClick={() => openCaravana(w.caravana, "lot", "weights")}>{w.caravana}</button></td>
                     <td>{w.weight.toFixed(1)} kg</td>
                     {canEdit && <td className="actions">
                       <button
