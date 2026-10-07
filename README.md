@@ -23,6 +23,7 @@ http://localhost:5173
 - Comparar animales por número de caravana.
 - Historial de pesajes.
 - Registrar traslados entre lotes sin agregar un pesaje falso.
+- Cambiar caravana conservando el identificador histórico de cada pesaje.
 - Ganancia total y ganancia diaria.
 - Importar Excel/CSV de alimentación.
 - Detectar Fecha, Comederos, Animales, Total de comida, Sal, Bolsas y Días transcurridos.

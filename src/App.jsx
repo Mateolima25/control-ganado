@@ -119,6 +119,7 @@ const emptyData = {
   weighings: [],
   feedings: [],
   movements: [],
+  caravanaChanges: [],
 };
 
 function readStored() {
@@ -129,9 +130,10 @@ function readStored() {
       weighings: Array.isArray(stored?.weighings) ? stored.weighings : [],
       feedings: Array.isArray(stored?.feedings) ? stored.feedings : [],
       movements: Array.isArray(stored?.movements) ? stored.movements : [],
+      caravanaChanges: Array.isArray(stored?.caravanaChanges) ? stored.caravanaChanges : [],
     };
   } catch {
-    return { lots: [], weighings: [], feedings: [], movements: [] };
+    return { lots: [], weighings: [], feedings: [], movements: [], caravanaChanges: [] };
   }
 }
 
@@ -236,6 +238,7 @@ function App() {
         weighings: Array.isArray(initialData.weighings) ? initialData.weighings : [],
         feedings: Array.isArray(initialData.feedings) ? initialData.feedings : [],
         movements: Array.isArray(initialData.movements) ? initialData.movements : [],
+        caravanaChanges: Array.isArray(initialData.caravanaChanges) ? initialData.caravanaChanges : [],
       };
       if (active) {
         lastSyncedData.current = JSON.stringify(nextData);
@@ -292,6 +295,7 @@ function App() {
         weighings: Array.isArray(sharedState.data.weighings) ? sharedState.data.weighings : [],
         feedings: Array.isArray(sharedState.data.feedings) ? sharedState.data.feedings : [],
         movements: Array.isArray(sharedState.data.movements) ? sharedState.data.movements : [],
+        caravanaChanges: Array.isArray(sharedState.data.caravanaChanges) ? sharedState.data.caravanaChanges : [],
       };
       setData((current) => JSON.stringify(current) === JSON.stringify(nextData) ? current : nextData);
     };
@@ -341,6 +345,7 @@ function App() {
       weighings: prev.weighings.filter((w) => w.lotId !== id),
       feedings: prev.feedings.filter((f) => f.lotId !== id),
       movements: prev.movements.filter((m) => m.fromLotId !== id && m.toLotId !== id),
+      caravanaChanges: prev.caravanaChanges,
     }));
     setSelectedLotId(null);
     setPage("lots");
@@ -397,11 +402,53 @@ function App() {
     }));
   };
 
+  const changeAnimalCaravana = (caravana, nextCaravana, date, reason) => {
+    if (!isOwner) return;
+    const normalizedNextCaravana = String(nextCaravana || "").trim();
+    const animal = animalRecords(data).find((record) => record.caravana === caravana);
+    if (!animal || !normalizedNextCaravana || normalizedNextCaravana === caravana) return;
+
+    const normalizedAliases = animal.caravanaAliases.map((alias) => normalize(alias));
+    if (normalizedAliases.includes(normalize(normalizedNextCaravana))) {
+      alert("Esa caravana ya forma parte del historial de este animal. Ingresa un número nuevo.");
+      return;
+    }
+    const collision = animalRecords(data).find((record) =>
+      record.caravana !== caravana && record.caravanaAliases.some(
+        (alias) => normalize(alias) === normalize(normalizedNextCaravana)
+      )
+    );
+    if (collision) {
+      alert(`La caravana ${normalizedNextCaravana} ya está asociada a otro animal (${collision.caravana}).`);
+      return;
+    }
+    if (animal.lastEventDate && date < animal.lastEventDate) {
+      alert(`La fecha del cambio no puede ser anterior al último registro (${formatDate(animal.lastEventDate)}).`);
+      return;
+    }
+
+    setData((prev) => ({
+      ...prev,
+      caravanaChanges: [...(prev.caravanaChanges || []), {
+        id: crypto.randomUUID(),
+        fromCaravana: caravana,
+        toCaravana: normalizedNextCaravana,
+        date,
+        reason: reason.trim(),
+      }],
+    }));
+    setSelectedCaravana(normalizedNextCaravana);
+  };
+
   const importWeights = async (file, lotId) => {
     if (!isOwner) return;
     try {
       const rows = await readSpreadsheet(file);
-      const mapped = mapWeightRows(rows);
+      const mapped = mapWeightRows(rows).map((row) => ({
+        ...row,
+        recordedCaravana: row.caravana,
+        caravana: resolveCurrentCaravana(data.caravanaChanges || [], row.caravana),
+      }));
       const uniqueRows = new Map();
       let duplicateCount = 0;
       const weighingKey = (row) => JSON.stringify([row.caravana, row.date]);
@@ -415,7 +462,10 @@ function App() {
       const existingRows = new Map(
         data.weighings
           .filter((row) => row.lotId === lotId)
-          .map((row) => [weighingKey(row), row])
+          .map((row) => [
+            JSON.stringify([resolveCurrentCaravana(data.caravanaChanges || [], row.caravana), row.date]),
+            row,
+          ])
       );
       const previewRows = [...uniqueRows.values()].map((row) => {
         const existing = existingRows.get(weighingKey(row));
@@ -450,7 +500,10 @@ function App() {
       ...prev,
       weighings: [
         ...prev.weighings.filter(
-          (old) => !(old.lotId === weightImportPreview.lotId && keys.has(JSON.stringify([old.caravana, old.date])))
+          (old) => !(old.lotId === weightImportPreview.lotId && keys.has(JSON.stringify([
+            resolveCurrentCaravana(data.caravanaChanges || [], old.caravana),
+            old.date,
+          ])))
         ),
         ...newRows,
       ],
@@ -592,6 +645,7 @@ function App() {
             goLot={goLot}
             onBack={() => setPage(animalReturnPage)}
             onMove={moveAnimal}
+            onChangeCaravana={changeAnimalCaravana}
             canEdit={isOwner}
           />
         )}
@@ -792,9 +846,9 @@ function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
 
 function Caravanas({ data, search, goLot, openCaravana }) {
   const animals = useMemo(() => animalRecords(data)
-      .filter((animal) => !search || normalize(animal.caravana).includes(normalize(search)))
+      .filter((animal) => !search || animal.caravanaAliases.some((alias) => normalize(alias).includes(normalize(search))))
       .sort((a, b) => b.currentWeight - a.currentWeight),
-    [data.lots, data.movements, data.weighings, search]
+    [data.lots, data.movements, data.weighings, data.caravanaChanges, search]
   );
 
   const avgWeight = animals.length
@@ -828,7 +882,10 @@ function Caravanas({ data, search, goLot, openCaravana }) {
                 <thead><tr><th>Caravana</th><th>Pesajes</th><th>Desde</th><th>Peso inicial</th><th>Peso actual</th><th>Lote actual</th><th>Ganancia</th><th>Kg/día</th></tr></thead>
                 <tbody>{animals.map((animal) => (
                   <tr key={animal.caravana}>
-                    <td><button className="link-button" onClick={() => openCaravana(animal.caravana)}>{animal.caravana}</button></td>
+                    <td>
+                      <button className="link-button" onClick={() => openCaravana(animal.caravana)}>{animal.caravana}</button>
+                      {animal.caravanaChanges.length > 0 && <span className="caravana-change-tag">Actualizada</span>}
+                    </td>
                     <td>{animal.count}</td>
                     <td>{formatDate(animal.history[0]?.date)}</td>
                     <td>{animal.initialWeight.toFixed(1)} kg</td>
@@ -847,8 +904,9 @@ function Caravanas({ data, search, goLot, openCaravana }) {
   );
 }
 
-function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
+function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana, canEdit }) {
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [showChangeCaravanaModal, setShowChangeCaravanaModal] = useState(false);
   const animal = animalRecords(data).find((record) => record.caravana === caravana);
   const history = animal?.history || [];
   const stats = animalStats(history, caravana);
@@ -871,9 +929,10 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
       fromLotName: lotNames.get(movement.fromLotId) || "Lote no disponible",
       toLotName: lotNames.get(movement.toLotId) || "Lote no disponible",
     })),
+    ...(animal?.caravanaChanges || []).map((change) => ({ ...change, eventType: "caravanaChange" })),
   ].sort((a, b) =>
     (b.date || "").localeCompare(a.date || "") ||
-    (a.eventType === "movement" ? -1 : 1)
+    ({ weighing: 0, caravanaChange: 1, movement: 2 }[a.eventType] - { weighing: 0, caravanaChange: 1, movement: 2 }[b.eventType])
   );
   const canMove = canEdit && animal?.currentLotId && data.lots.some((lot) => lot.id !== animal.currentLotId);
 
@@ -886,8 +945,16 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
         <>
           <div className="animal-detail-actions">
             {animal.currentLotId && <button className="link-button" onClick={() => goLot(animal.currentLotId)}>Abrir lote actual: {animal.currentLot}</button>}
+            {canEdit && <button className="secondary" onClick={() => setShowChangeCaravanaModal(true)}><Tags size={16} /> Cambiar caravana</button>}
             {canMove && <button className="secondary" onClick={() => setShowMoveModal(true)}><ArrowRightLeft size={16} /> Trasladar de lote</button>}
           </div>
+
+          {animal.caravanaChanges.length > 0 && (
+            <div className="caravana-change-notice" role="status">
+              <Tags size={16} /> <b>Caravana cambiada</b>
+              <span>Anterior: {animal.caravanaChanges.map((change) => change.fromCaravana).join(" → ")} · Actual: {animal.caravana}</span>
+            </div>
+          )}
 
           <div className="stats-grid">
             <Stat icon={<Beef />} label="Lote actual" value={animal.currentLot} />
@@ -925,12 +992,15 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
                       <>
                         <td>Pesaje</td>
                         <td><b>{event.weight.toFixed(1)} kg</b></td>
-                        <td>{event.lotId ? <button className="link-button" onClick={() => goLot(event.lotId)}>{event.lotName}</button> : event.lotName}</td>
+                        <td>
+                          {event.lotId ? <button className="link-button" onClick={() => goLot(event.lotId)}>{event.lotName}</button> : event.lotName}
+                          {event.recordedCaravana !== animal.caravana && <span className="recorded-caravana">Caravana registrada: {event.recordedCaravana}</span>}
+                        </td>
                         <td className={changeByWeighing.get(event.id) === null ? "" : changeByWeighing.get(event.id) >= 0 ? "positive" : "negative"}>
                           {changeByWeighing.get(event.id) === null ? "Primer registro" : `${changeByWeighing.get(event.id) >= 0 ? "+" : ""}${changeByWeighing.get(event.id).toFixed(1)} kg`}
                         </td>
                       </>
-                    ) : (
+                    ) : event.eventType === "movement" ? (
                       <>
                         <td>Traslado</td>
                         <td>-</td>
@@ -939,6 +1009,13 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
                           {" → "}
                           {event.toLotId && <button className="link-button" onClick={() => goLot(event.toLotId)}>{event.toLotName}</button>}
                         </td>
+                        <td>-</td>
+                      </>
+                    ) : (
+                      <>
+                        <td><span className="caravana-change-tag">Cambio de caravana</span></td>
+                        <td>-</td>
+                        <td>{event.fromCaravana} → {event.toCaravana}{event.reason ? <span className="recorded-caravana">{event.reason}</span> : null}</td>
                         <td>-</td>
                       </>
                     )}
@@ -958,6 +1035,16 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
           onSave={(toLotId, date) => {
             onMove(caravana, toLotId, date);
             setShowMoveModal(false);
+          }}
+        />
+      )}
+      {showChangeCaravanaModal && animal && (
+        <ChangeCaravanaModal
+          animal={animal}
+          onClose={() => setShowChangeCaravanaModal(false)}
+          onSave={(nextCaravana, date, reason) => {
+            onChangeCaravana(caravana, nextCaravana, date, reason);
+            setShowChangeCaravanaModal(false);
           }}
         />
       )}
@@ -997,6 +1084,42 @@ function MovementModal({ animal, lots, onClose, onSave }) {
         <div className="modal-actions">
           <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
           <button className="primary" type="submit" disabled={!destinations.length}><ArrowRightLeft size={16} /> Registrar traslado</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ChangeCaravanaModal({ animal, onClose, onSave }) {
+  const [nextCaravana, setNextCaravana] = useState("");
+  const [reason, setReason] = useState("");
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [date, setDate] = useState(todayString);
+
+  const submit = (event) => {
+    event.preventDefault();
+    const value = nextCaravana.trim();
+    if (!value || value === animal.caravana || !date) return;
+    onSave(value, date, reason.trim());
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>Cambiar caravana</h3><span>Se conservará el número original de cada pesaje.</span></div>
+          <button type="button" title="Cerrar" aria-label="Cerrar" onClick={onClose}><X size={19} /></button>
+        </div>
+        <label>Caravana actual<input value={animal.caravana} readOnly /></label>
+        <label>Caravana nueva<input autoFocus value={nextCaravana} onChange={(event) => setNextCaravana(event.target.value)} required /></label>
+        <label>Fecha efectiva
+          <input type="date" value={date} min={animal.lastEventDate || undefined} max={todayString} onChange={(event) => setDate(event.target.value)} required />
+        </label>
+        <label>Motivo (opcional)<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. Corrección de trazabilidad" /></label>
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
+          <button className="primary" type="submit" disabled={!nextCaravana.trim() || nextCaravana.trim() === animal.caravana}><Tags size={16} /> Confirmar cambio</button>
         </div>
       </form>
     </div>
@@ -1046,7 +1169,10 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
               <tbody>{preview.rows.map((row) => (
                 <tr key={row.id}>
                   <td>{formatDate(row.date)}</td>
-                  <td><b>{row.caravana}</b></td>
+                  <td>
+                    <b>{row.recordedCaravana || row.caravana}</b>
+                    {row.recordedCaravana && row.recordedCaravana !== row.caravana && <span className="recorded-caravana">Asociada a {row.caravana}</span>}
+                  </td>
                   <td>{row.weight.toFixed(1)} kg</td>
                   <td className={row.replacesExisting ? "negative" : "positive"}>
                     {row.replacesExisting ? "Reemplaza existente" : "Nuevo"}
@@ -1218,7 +1344,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
                   <tr key={w.id}>
                     <td>{formatDate(w.date)}</td>
-                    <td><button className="link-button" onClick={() => openCaravana(w.caravana, "lot", "weights")}>{w.caravana}</button></td>
+                    <td><button className="link-button" onClick={() => openCaravana(resolveCurrentCaravana(data.caravanaChanges || [], w.caravana), "lot", "weights")}>{w.recordedCaravana || w.caravana}</button></td>
                     <td>{w.weight.toFixed(1)} kg</td>
                     {canEdit && <td className="actions">
                       <button
@@ -1321,21 +1447,59 @@ function animalStats(rows, caravana) {
   };
 }
 
+function resolveCurrentCaravana(changes, caravana) {
+  let current = caravana;
+  const visited = new Set();
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    const nextChange = changes
+      .filter((change) => change.fromCaravana === current)
+      .slice()
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+      .at(-1);
+    if (!nextChange) break;
+    current = nextChange.toCaravana;
+  }
+  return current;
+}
+
+function caravanaFamily(changes, caravana) {
+  const aliases = new Set([caravana]);
+  let expanded = true;
+  while (expanded) {
+    expanded = false;
+    changes.forEach((change) => {
+      if (aliases.has(change.fromCaravana) && !aliases.has(change.toCaravana)) {
+        aliases.add(change.toCaravana);
+        expanded = true;
+      }
+      if (aliases.has(change.toCaravana) && !aliases.has(change.fromCaravana)) {
+        aliases.add(change.fromCaravana);
+        expanded = true;
+      }
+    });
+  }
+  return [...aliases];
+}
+
 function animalRecords(data) {
   const weighingGroups = new Map();
   const movementGroups = new Map();
   const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
+  const caravanaChanges = data.caravanaChanges || [];
 
   data.weighings.forEach((weighing) => {
     if (!weighing.caravana) return;
-    const rows = weighingGroups.get(weighing.caravana) || [];
-    rows.push(weighing);
-    weighingGroups.set(weighing.caravana, rows);
+    const caravana = resolveCurrentCaravana(caravanaChanges, weighing.caravana);
+    const rows = weighingGroups.get(caravana) || [];
+    rows.push({ ...weighing, recordedCaravana: weighing.recordedCaravana || weighing.caravana });
+    weighingGroups.set(caravana, rows);
   });
   (data.movements || []).forEach((movement) => {
-    const rows = movementGroups.get(movement.caravana) || [];
+    const caravana = resolveCurrentCaravana(caravanaChanges, movement.caravana);
+    const rows = movementGroups.get(caravana) || [];
     rows.push(movement);
-    movementGroups.set(movement.caravana, rows);
+    movementGroups.set(caravana, rows);
   });
 
   const caravanas = new Set([...weighingGroups.keys(), ...movementGroups.keys()]);
@@ -1350,17 +1514,26 @@ function animalRecords(data) {
     const movements = (movementGroups.get(caravana) || [])
       .slice()
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const identityChanges = caravanaChanges
+      .filter((change) => resolveCurrentCaravana(caravanaChanges, change.fromCaravana) === caravana)
+      .slice()
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const latestWeight = history[history.length - 1];
     const latestMovement = movements[movements.length - 1];
     const movementIsLatest = latestMovement &&
       (!latestWeight || (latestMovement.date || "") >= (latestWeight.date || ""));
     const currentLotId = movementIsLatest ? latestMovement.toLotId : latestWeight?.lotId || null;
-    const lastEventDate = movementIsLatest ? latestMovement.date : latestWeight?.date || "";
+    const lastEventDate = [latestWeight?.date, latestMovement?.date, ...identityChanges.map((change) => change.date)]
+      .filter(Boolean)
+      .sort()
+      .at(-1) || "";
 
     return {
       ...animalStats(history, caravana),
       history,
       movements,
+      caravanaChanges: identityChanges,
+      caravanaAliases: caravanaFamily(caravanaChanges, caravana),
       currentLotId,
       currentLot: lotNames.get(currentLotId) || (currentLotId ? "Lote no disponible" : "-"),
       lastEventDate,
