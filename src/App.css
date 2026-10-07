@@ -42,7 +42,12 @@ nav button:hover, nav button.active { background: #18201b; color: #8ee6a2; }
 .stat-card strong { font-size: 18px; }
 .section { margin-top: 10px; }
 .section-title, .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 13px; }
+.panel-title { flex-wrap: wrap; }
 .section-title h3, .panel-title h3 { margin: 0 0 3px; font-size: 16px; }
+.month-delete { display: flex; align-items: center; gap: 8px; }
+.month-delete select { min-width: 145px; background: #171d24; color: #dbe1e7; border: 1px solid #2d3742; border-radius: 8px; padding: 8px 10px; text-transform: capitalize; }
+.month-delete button { border: 1px solid #553237; border-radius: 8px; background: #241719; color: #f08a8a; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; white-space: nowrap; }
+.month-delete button:hover { background: #351d20; }
 .lot-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .lot-card { text-align: left; border: 1px solid #252e38; background: #11171e; color: #e5e7eb; border-radius: 13px; padding: 18px; transition: .15s; }
 .lot-card:hover { transform: translateY(-2px); border-color: #4d6d56; }
@@ -115,4 +120,6 @@ tr:last-child td { border-bottom: 0; }
   .hero { flex-direction: column; align-items: flex-start; }
   .stats-grid, .lot-grid { grid-template-columns: 1fr; }
   .lot-actions { width: 100%; flex-wrap: wrap; }
+  .month-delete { width: 100%; }
+  .month-delete select { flex: 1; min-width: 0; }
 }

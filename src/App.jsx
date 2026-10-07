@@ -170,6 +170,24 @@ function App() {
     }));
   };
 
+  const deleteWeightsByMonth = (lotId, month) => {
+    const monthWeights = data.weighings.filter(
+      (row) => row.lotId === lotId && row.date?.startsWith(`${month}-`)
+    );
+    if (!monthWeights.length) return;
+    const monthLabel = new Date(`${month}-01T12:00:00`).toLocaleDateString("es-AR", {
+      month: "long",
+      year: "numeric",
+    });
+    if (!confirm(`¿Eliminar ${monthWeights.length} pesajes de ${monthLabel}? El lote y su alimentación se conservarán.`)) return;
+    setData((prev) => ({
+      ...prev,
+      weighings: prev.weighings.filter(
+        (row) => !(row.lotId === lotId && row.date?.startsWith(`${month}-`))
+      ),
+    }));
+  };
+
   const importWeights = async (file, lotId) => {
     const rows = await readSpreadsheet(file);
     const mapped = mapWeightRows(rows);
@@ -291,6 +309,7 @@ function App() {
             importWeights={importWeights}
             importFeed={importFeed}
             deleteWeighing={deleteWeighing}
+            deleteWeightsByMonth={deleteWeightsByMonth}
             deleteLot={deleteLot}
             setPage={setPage}
           />
@@ -548,9 +567,14 @@ function Caravanas({ data, search, goLot }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteLot, setPage }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage }) {
   const [tab, setTab] = useState("summary");
+  const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
+  const weightMonths = [...new Set(weights.map((weight) => weight.date?.slice(0, 7)).filter(Boolean))].sort().reverse();
+  const activeWeightMonth = weightMonths.includes(selectedWeightMonth)
+    ? selectedWeightMonth
+    : weightMonths[0] || "";
   const feeds = data.feedings.filter((f) => f.lotId === lot.id);
   const stats = lotStats(data, lot.id);
 
@@ -663,7 +687,30 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
 
       {tab === "weights" && (
         <section className="panel">
-          <div className="panel-title"><h3>Historial de pesajes</h3><span>Comparación por número de caravana</span></div>
+          <div className="panel-title">
+            <div><h3>Historial de pesajes</h3><span>Comparación por número de caravana</span></div>
+            {weightMonths.length > 0 && (
+              <div className="month-delete">
+                <select
+                  aria-label="Mes de pesaje que se eliminará"
+                  value={activeWeightMonth}
+                  onChange={(event) => setSelectedWeightMonth(event.target.value)}
+                >
+                  {weightMonths.map((month) => (
+                    <option key={month} value={month}>
+                      {new Date(`${month}-01T12:00:00`).toLocaleDateString("es-AR", {
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => deleteWeightsByMonth(lot.id, activeWeightMonth)}>
+                  <Trash2 size={15} /> Eliminar mes
+                </button>
+              </div>
+            )}
+          </div>
           {weights.length === 0 ? (
             <Empty icon={<FileSpreadsheet />} title="No hay pesajes" text="Importá el Excel/CSV de True-Test." />
           ) : (
