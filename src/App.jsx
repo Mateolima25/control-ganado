@@ -511,6 +511,7 @@ function App() {
             deleteWeightsByMonth={deleteWeightsByMonth}
             deleteLot={deleteLot}
             setPage={setPage}
+            goLot={goLot}
             canEdit={isOwner}
           />
         )}
@@ -820,7 +821,7 @@ function Caravanas({ data, search, goLot }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, canEdit }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, canEdit }) {
   const [tab, setTab] = useState("summary");
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
@@ -832,18 +833,32 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const stats = lotStats(data, lot.id);
 
   const animals = useMemo(() => {
-    const grouped = {};
-    weights.forEach((w) => {
-      const key = w.caravana;
-      if (!key) return;
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push(w);
+    const histories = new Map();
+    data.weighings.forEach((weighing) => {
+      if (!weighing.caravana) return;
+      const history = histories.get(weighing.caravana) || [];
+      history.push(weighing);
+      histories.set(weighing.caravana, history);
     });
-    return Object.entries(grouped)
-      .map(([caravana, rows]) => animalStats(rows, caravana))
+
+    const lotNames = new Map(data.lots.map((item) => [item.id, item.name]));
+    const caravanasInLot = new Set(weights.map((weighing) => weighing.caravana).filter(Boolean));
+
+    return [...caravanasInLot]
+      .map((caravana) => {
+        const history = (histories.get(caravana) || [])
+          .slice()
+          .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+        const latest = history[history.length - 1];
+        return {
+          ...animalStats(history, caravana),
+          currentLotId: latest?.lotId,
+          currentLot: lotNames.get(latest?.lotId) || "Lote no disponible",
+        };
+      })
       .filter((a) => !search || a.caravana.toLowerCase().includes(search.toLowerCase()))
       .sort((a, b) => b.currentWeight - a.currentWeight);
-  }, [weights, search]);
+  }, [data.lots, data.weighings, weights, search]);
 
   const chartData = animals.slice(0, 15).map((a) => ({
     caravana: a.caravana.slice(-8),
@@ -914,16 +929,17 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
 
       {tab === "animals" && (
         <section className="panel">
-          <div className="panel-title"><h3>Animales por caravana</h3><span>{animals.length} encontrados</span></div>
+          <div className="panel-title"><h3>Animales por caravana</h3><span>Ganancia e historial completo, incluso al cambiar de lote · {animals.length} encontrados</span></div>
           {animals.length === 0 ? (
             <Empty icon={<Beef />} title="No hay animales" text="Importá un archivo de True-Test." />
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Caravana</th><th>Pesajes</th><th>Inicial</th><th>Actual</th><th>Ganancia</th><th>Días</th><th>Ganancia diaria</th></tr></thead>
+                <thead><tr><th>Caravana</th><th>Lote actual</th><th>Pesajes</th><th>Inicial</th><th>Actual</th><th>Ganancia</th><th>Días</th><th>Ganancia diaria</th></tr></thead>
                 <tbody>{animals.map((a) => (
                   <tr key={a.caravana}>
                     <td><b>{a.caravana}</b></td>
+                    <td>{a.currentLotId ? <button className="link-button" onClick={() => goLot(a.currentLotId)}>{a.currentLot}</button> : a.currentLot}</td>
                     <td>{a.count}</td>
                     <td>{a.initialWeight.toFixed(1)} kg</td>
                     <td>{a.currentWeight.toFixed(1)} kg</td>
