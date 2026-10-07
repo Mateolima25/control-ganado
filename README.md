@@ -22,12 +22,13 @@ http://localhost:5173
 - Detectar columnas EID, RFID, VID, Caravana, Peso y Fecha.
 - Comparar animales por número de caravana.
 - Historial de pesajes.
+- Registrar traslados entre lotes sin agregar un pesaje falso.
 - Ganancia total y ganancia diaria.
 - Importar Excel/CSV de alimentación.
 - Detectar Fecha, Comederos, Animales, Total de comida, Sal, Bolsas y Días transcurridos.
 - Calcular kg de comida por animal por día.
 - Dashboard y gráficos.
-- Datos guardados en el navegador mediante localStorage.
+- Datos sincronizados con Supabase y cache local para la cuenta propietaria.
 
 ## Formato de alimentación
 

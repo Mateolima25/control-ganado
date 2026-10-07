@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "./supabase";
 import {
+  ArrowRightLeft,
   Beef,
   CalendarDays,
   ChevronRight,
@@ -117,6 +118,7 @@ const emptyData = {
   lots: [],
   weighings: [],
   feedings: [],
+  movements: [],
 };
 
 function readStored() {
@@ -126,9 +128,10 @@ function readStored() {
       lots: Array.isArray(stored?.lots) ? stored.lots : [],
       weighings: Array.isArray(stored?.weighings) ? stored.weighings : [],
       feedings: Array.isArray(stored?.feedings) ? stored.feedings : [],
+      movements: Array.isArray(stored?.movements) ? stored.movements : [],
     };
   } catch {
-    return { lots: [], weighings: [], feedings: [] };
+    return { lots: [], weighings: [], feedings: [], movements: [] };
   }
 }
 
@@ -232,6 +235,7 @@ function App() {
         lots: Array.isArray(initialData.lots) ? initialData.lots : [],
         weighings: Array.isArray(initialData.weighings) ? initialData.weighings : [],
         feedings: Array.isArray(initialData.feedings) ? initialData.feedings : [],
+        movements: Array.isArray(initialData.movements) ? initialData.movements : [],
       };
       if (active) {
         lastSyncedData.current = JSON.stringify(nextData);
@@ -287,6 +291,7 @@ function App() {
         lots: Array.isArray(sharedState.data.lots) ? sharedState.data.lots : [],
         weighings: Array.isArray(sharedState.data.weighings) ? sharedState.data.weighings : [],
         feedings: Array.isArray(sharedState.data.feedings) ? sharedState.data.feedings : [],
+        movements: Array.isArray(sharedState.data.movements) ? sharedState.data.movements : [],
       };
       setData((current) => JSON.stringify(current) === JSON.stringify(nextData) ? current : nextData);
     };
@@ -335,6 +340,7 @@ function App() {
       lots: prev.lots.filter((l) => l.id !== id),
       weighings: prev.weighings.filter((w) => w.lotId !== id),
       feedings: prev.feedings.filter((f) => f.lotId !== id),
+      movements: prev.movements.filter((m) => m.fromLotId !== id && m.toLotId !== id),
     }));
     setSelectedLotId(null);
     setPage("lots");
@@ -367,6 +373,27 @@ function App() {
       weighings: prev.weighings.filter(
         (row) => !(row.lotId === lotId && row.date?.startsWith(`${month}-`))
       ),
+    }));
+  };
+
+  const moveAnimal = (caravana, toLotId, date) => {
+    if (!isOwner) return;
+    const animal = animalRecords(data).find((record) => record.caravana === caravana);
+    if (!animal?.currentLotId || animal.currentLotId === toLotId) return;
+    if (animal.lastEventDate && date < animal.lastEventDate) {
+      alert(`La fecha del traslado no puede ser anterior al último movimiento o pesaje (${formatDate(animal.lastEventDate)}).`);
+      return;
+    }
+
+    setData((prev) => ({
+      ...prev,
+      movements: [...prev.movements, {
+        id: crypto.randomUUID(),
+        caravana,
+        fromLotId: animal.currentLotId,
+        toLotId,
+        date,
+      }],
     }));
   };
 
@@ -564,6 +591,8 @@ function App() {
             caravana={selectedCaravana}
             goLot={goLot}
             onBack={() => setPage(animalReturnPage)}
+            onMove={moveAnimal}
+            canEdit={isOwner}
           />
         )}
 
@@ -654,12 +683,9 @@ function InfoScreen({ title, text, action, actionLabel }) {
 }
 
 function Dashboard({ data, goLot, setModal, canEdit }) {
-  const totalAnimals = data.lots.reduce((sum, l) => {
-    const latest = latestWeightByLot(data.weighings, l.id);
-    return sum + latest.length;
-  }, 0);
-
-  const allLatest = data.lots.flatMap((l) => latestWeightByLot(data.weighings, l.id));
+  const currentAnimals = animalRecords(data).filter((animal) => animal.currentLotId);
+  const totalAnimals = currentAnimals.length;
+  const allLatest = currentAnimals;
   const avgWeight = allLatest.length
     ? allLatest.reduce((s, x) => s + x.weight, 0) / allLatest.length
     : 0;
@@ -765,38 +791,11 @@ function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
 }
 
 function Caravanas({ data, search, goLot, openCaravana }) {
-  const animals = useMemo(() => {
-    const grouped = new Map();
-    const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
-
-    data.weighings.forEach((weighing) => {
-      if (!weighing.caravana) return;
-      const rows = grouped.get(weighing.caravana) || [];
-      rows.push(weighing);
-      grouped.set(weighing.caravana, rows);
-    });
-
-    return [...grouped.entries()]
-      .map(([caravana, rows]) => {
-        const history = rows
-          .slice()
-          .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
-          .map((weighing) => ({
-            ...weighing,
-            lotName: lotNames.get(weighing.lotId) || "Lote no disponible",
-          }));
-        const latest = history[history.length - 1];
-
-        return {
-          ...animalStats(history, caravana),
-          history,
-          currentLot: latest?.lotName || "-",
-          currentLotId: latest?.lotId,
-        };
-      })
+  const animals = useMemo(() => animalRecords(data)
       .filter((animal) => !search || normalize(animal.caravana).includes(normalize(search)))
-      .sort((a, b) => b.currentWeight - a.currentWeight);
-  }, [data.lots, data.weighings, search]);
+      .sort((a, b) => b.currentWeight - a.currentWeight),
+    [data.lots, data.movements, data.weighings, search]
+  );
 
   const avgWeight = animals.length
     ? animals.reduce((sum, animal) => sum + animal.currentWeight, 0) / animals.length
@@ -848,76 +847,158 @@ function Caravanas({ data, search, goLot, openCaravana }) {
   );
 }
 
-function AnimalDetail({ data, caravana, goLot, onBack }) {
-  const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
-  const history = data.weighings
-    .filter((weighing) => weighing.caravana === caravana)
-    .slice()
-    .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
-    .map((weighing) => ({
-      ...weighing,
-      lotName: lotNames.get(weighing.lotId) || "Lote no disponible",
-    }));
+function AnimalDetail({ data, caravana, goLot, onBack, onMove, canEdit }) {
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const animal = animalRecords(data).find((record) => record.caravana === caravana);
+  const history = animal?.history || [];
   const stats = animalStats(history, caravana);
-  const latest = history[history.length - 1];
+  const movements = animal?.movements || [];
+  const changeByWeighing = new Map(history.map((weighing, index) => [
+    weighing.id,
+    index ? weighing.weight - history[index - 1].weight : null,
+  ]));
   const chartData = history.map((weighing) => ({
     date: formatDate(weighing.date),
     weight: weighing.weight,
     lotName: weighing.lotName,
   }));
+  const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
+  const timeline = [
+    ...history.map((weighing) => ({ ...weighing, eventType: "weighing" })),
+    ...movements.map((movement) => ({
+      ...movement,
+      eventType: "movement",
+      fromLotName: lotNames.get(movement.fromLotId) || "Lote no disponible",
+      toLotName: lotNames.get(movement.toLotId) || "Lote no disponible",
+    })),
+  ].sort((a, b) =>
+    (b.date || "").localeCompare(a.date || "") ||
+    (a.eventType === "movement" ? -1 : 1)
+  );
+  const canMove = canEdit && animal?.currentLotId && data.lots.some((lot) => lot.id !== animal.currentLotId);
 
   return (
     <div className="content">
       <button className="back animal-back" onClick={onBack}>← Volver</button>
-      {history.length === 0 ? (
-        <Empty icon={<Beef />} title="No hay pesajes" text="No encontramos historial para esta caravana." />
+      {!animal ? (
+        <Empty icon={<Beef />} title="No hay historial" text="No encontramos registros para esta caravana." />
       ) : (
         <>
+          <div className="animal-detail-actions">
+            {animal.currentLotId && <button className="link-button" onClick={() => goLot(animal.currentLotId)}>Abrir lote actual: {animal.currentLot}</button>}
+            {canMove && <button className="secondary" onClick={() => setShowMoveModal(true)}><ArrowRightLeft size={16} /> Trasladar de lote</button>}
+          </div>
+
           <div className="stats-grid">
-            <Stat icon={<Beef />} label="Lote actual" value={latest?.lotName || "-"} />
+            <Stat icon={<Beef />} label="Lote actual" value={animal.currentLot} />
             <Stat icon={<FileSpreadsheet />} label="Pesajes" value={stats.count} />
             <Stat icon={<Gauge />} label="Peso actual" value={`${stats.currentWeight.toFixed(1)} kg`} />
             <Stat icon={<CalendarDays />} label="Ganancia total" value={`${stats.gain >= 0 ? "+" : ""}${stats.gain.toFixed(1)} kg`} />
           </div>
 
-          <section className="panel caravan-evolution">
-            <div className="panel-title">
-              <div><h3>Evolución de {caravana}</h3><span>{stats.days} días de seguimiento</span></div>
-              {latest?.lotId && <button className="link-button" onClick={() => goLot(latest.lotId)}>Abrir lote actual: {latest.lotName}</button>}
-            </div>
-            <div className="chart"><ResponsiveContainer width="100%" height={300}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip formatter={(value) => [`${Number(value).toFixed(1)} kg`, "Peso"]} labelFormatter={(label, payload) => payload?.[0]?.payload?.lotName ? `${label} · ${payload[0].payload.lotName}` : label} />
-                <Line type="monotone" dataKey="weight" stroke="#7ee29b" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer></div>
-          </section>
+          {history.length > 0 ? (
+            <section className="panel caravan-evolution">
+              <div className="panel-title">
+                <div><h3>Evolución de {caravana}</h3><span>{stats.days} días de seguimiento</span></div>
+              </div>
+              <div className="chart"><ResponsiveContainer width="100%" height={300}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip formatter={(value) => [`${Number(value).toFixed(1)} kg`, "Peso"]} labelFormatter={(label, payload) => payload?.[0]?.payload?.lotName ? `${label} · ${payload[0].payload.lotName}` : label} />
+                  <Line type="monotone" dataKey="weight" stroke="#7ee29b" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer></div>
+            </section>
+          ) : <Empty icon={<Gauge />} title="Sin pesajes" text="Esta caravana no tiene pesajes para graficar." />}
 
           <section className="panel caravan-history">
-            <div className="panel-title"><h3>Historial y movimientos</h3><span>Cada pesaje conserva el lote donde se registró.</span></div>
+            <div className="panel-title"><h3>Historial de pesajes y movimientos</h3><span>Los traslados no agregan ni modifican pesos.</span></div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Peso</th><th>Lote</th><th>Cambio desde pesaje anterior</th></tr></thead>
-                <tbody>{history.slice().reverse().map((weighing, index, descendingHistory) => {
-                  const previous = descendingHistory[index + 1];
-                  const change = previous ? weighing.weight - previous.weight : null;
-                  return (
-                    <tr key={weighing.id}>
-                      <td>{formatDate(weighing.date)}</td>
-                      <td><b>{weighing.weight.toFixed(1)} kg</b></td>
-                      <td>{weighing.lotId ? <button className="link-button" onClick={() => goLot(weighing.lotId)}>{weighing.lotName}</button> : weighing.lotName}</td>
-                      <td className={change === null ? "" : change >= 0 ? "positive" : "negative"}>{change === null ? "Primer registro" : `${change >= 0 ? "+" : ""}${change.toFixed(1)} kg`}</td>
-                    </tr>
-                  );
-                })}</tbody>
+                <thead><tr><th>Fecha</th><th>Evento</th><th>Peso</th><th>Lote o movimiento</th><th>Cambio de peso</th></tr></thead>
+                <tbody>{timeline.map((event) => (
+                  <tr key={`${event.eventType}-${event.id}`}>
+                    <td>{formatDate(event.date)}</td>
+                    {event.eventType === "weighing" ? (
+                      <>
+                        <td>Pesaje</td>
+                        <td><b>{event.weight.toFixed(1)} kg</b></td>
+                        <td>{event.lotId ? <button className="link-button" onClick={() => goLot(event.lotId)}>{event.lotName}</button> : event.lotName}</td>
+                        <td className={changeByWeighing.get(event.id) === null ? "" : changeByWeighing.get(event.id) >= 0 ? "positive" : "negative"}>
+                          {changeByWeighing.get(event.id) === null ? "Primer registro" : `${changeByWeighing.get(event.id) >= 0 ? "+" : ""}${changeByWeighing.get(event.id).toFixed(1)} kg`}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td>Traslado</td>
+                        <td>-</td>
+                        <td>
+                          {event.fromLotId && <button className="link-button" onClick={() => goLot(event.fromLotId)}>{event.fromLotName}</button>}
+                          {" → "}
+                          {event.toLotId && <button className="link-button" onClick={() => goLot(event.toLotId)}>{event.toLotName}</button>}
+                        </td>
+                        <td>-</td>
+                      </>
+                    )}
+                  </tr>
+                ))}</tbody>
               </table>
             </div>
           </section>
         </>
       )}
+
+      {showMoveModal && animal && (
+        <MovementModal
+          animal={animal}
+          lots={data.lots}
+          onClose={() => setShowMoveModal(false)}
+          onSave={(toLotId, date) => {
+            onMove(caravana, toLotId, date);
+            setShowMoveModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MovementModal({ animal, lots, onClose, onSave }) {
+  const destinations = lots.filter((lot) => lot.id !== animal.currentLotId);
+  const [toLotId, setToLotId] = useState(destinations[0]?.id || "");
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [date, setDate] = useState(todayString);
+
+  const submit = (event) => {
+    event.preventDefault();
+    if (!toLotId || !date || (animal.lastEventDate && date < animal.lastEventDate)) return;
+    onSave(toLotId, date);
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>Trasladar caravana {animal.caravana}</h3><span>El peso y el historial de pesajes no cambiarán.</span></div>
+          <button type="button" title="Cerrar" aria-label="Cerrar" onClick={onClose}><X size={19} /></button>
+        </div>
+        <label>Lote de origen<input value={animal.currentLot} readOnly /></label>
+        <label>Lote de destino
+          <select value={toLotId} onChange={(event) => setToLotId(event.target.value)} required>
+            {destinations.map((lot) => <option key={lot.id} value={lot.id}>{lot.name}</option>)}
+          </select>
+        </label>
+        <label>Fecha del traslado
+          <input type="date" value={date} min={animal.lastEventDate || undefined} max={todayString} onChange={(event) => setDate(event.target.value)} required />
+        </label>
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
+          <button className="primary" type="submit" disabled={!destinations.length}><ArrowRightLeft size={16} /> Registrar traslado</button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -999,32 +1080,10 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const stats = lotStats(data, lot.id);
 
   const animals = useMemo(() => {
-    const histories = new Map();
-    data.weighings.forEach((weighing) => {
-      if (!weighing.caravana) return;
-      const history = histories.get(weighing.caravana) || [];
-      history.push(weighing);
-      histories.set(weighing.caravana, history);
-    });
-
-    const lotNames = new Map(data.lots.map((item) => [item.id, item.name]));
-    const caravanasInLot = new Set(weights.map((weighing) => weighing.caravana).filter(Boolean));
-
-    return [...caravanasInLot]
-      .map((caravana) => {
-        const history = (histories.get(caravana) || [])
-          .slice()
-          .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-        const latest = history[history.length - 1];
-        return {
-          ...animalStats(history, caravana),
-          currentLotId: latest?.lotId,
-          currentLot: lotNames.get(latest?.lotId) || "Lote no disponible",
-        };
-      })
+    return animalsInLot(data, lot.id)
       .filter((a) => !search || a.caravana.toLowerCase().includes(search.toLowerCase()))
       .sort((a, b) => b.currentWeight - a.currentWeight);
-  }, [data.lots, data.weighings, weights, search]);
+  }, [data, lot.id, search]);
 
   const chartData = animals.slice(0, 15).map((a) => ({
     caravana: a.caravana.slice(-8),
@@ -1245,14 +1304,6 @@ function Empty({ icon, title, text }) {
   return <div className="empty"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function latestWeightByLot(rows, lotId) {
-  const grouped = {};
-  rows.filter((w) => w.lotId === lotId).forEach((w) => {
-    if (!grouped[w.caravana] || (w.date || "") > (grouped[w.caravana].date || "")) grouped[w.caravana] = w;
-  });
-  return Object.values(grouped);
-}
-
 function animalStats(rows, caravana) {
   const sorted = rows.slice().sort((a,b) => (a.date || "").localeCompare(b.date || ""));
   const first = sorted[0];
@@ -1270,14 +1321,59 @@ function animalStats(rows, caravana) {
   };
 }
 
-function lotStats(data, lotId) {
-  const rows = data.weighings.filter((w) => w.lotId === lotId);
-  const grouped = {};
-  rows.forEach((w) => {
-    if (!grouped[w.caravana]) grouped[w.caravana] = [];
-    grouped[w.caravana].push(w);
+function animalRecords(data) {
+  const weighingGroups = new Map();
+  const movementGroups = new Map();
+  const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
+
+  data.weighings.forEach((weighing) => {
+    if (!weighing.caravana) return;
+    const rows = weighingGroups.get(weighing.caravana) || [];
+    rows.push(weighing);
+    weighingGroups.set(weighing.caravana, rows);
   });
-  const animals = Object.entries(grouped).map(([c, r]) => animalStats(r, c));
+  (data.movements || []).forEach((movement) => {
+    const rows = movementGroups.get(movement.caravana) || [];
+    rows.push(movement);
+    movementGroups.set(movement.caravana, rows);
+  });
+
+  const caravanas = new Set([...weighingGroups.keys(), ...movementGroups.keys()]);
+  return [...caravanas].map((caravana) => {
+    const history = (weighingGroups.get(caravana) || [])
+      .slice()
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+      .map((weighing) => ({
+        ...weighing,
+        lotName: lotNames.get(weighing.lotId) || "Lote no disponible",
+      }));
+    const movements = (movementGroups.get(caravana) || [])
+      .slice()
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const latestWeight = history[history.length - 1];
+    const latestMovement = movements[movements.length - 1];
+    const movementIsLatest = latestMovement &&
+      (!latestWeight || (latestMovement.date || "") >= (latestWeight.date || ""));
+    const currentLotId = movementIsLatest ? latestMovement.toLotId : latestWeight?.lotId || null;
+    const lastEventDate = movementIsLatest ? latestMovement.date : latestWeight?.date || "";
+
+    return {
+      ...animalStats(history, caravana),
+      history,
+      movements,
+      currentLotId,
+      currentLot: lotNames.get(currentLotId) || (currentLotId ? "Lote no disponible" : "-"),
+      lastEventDate,
+    };
+  });
+}
+
+function animalsInLot(data, lotId) {
+  return animalRecords(data).filter((animal) => animal.currentLotId === lotId);
+}
+
+function lotStats(data, lotId) {
+  const animals = animalsInLot(data, lotId);
   const avgWeight = animals.length ? animals.reduce((s, a) => s + a.currentWeight, 0) / animals.length : 0;
   const avgGain = animals.length ? animals.reduce((s, a) => s + a.gain, 0) / animals.length : 0;
   const validDaily = animals.filter((a) => a.days > 0).map((a) => a.daily);
