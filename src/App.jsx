@@ -143,6 +143,7 @@ function App() {
   const [syncError, setSyncError] = useState("");
   const [page, setPage] = useState("dashboard");
   const [selectedLotId, setSelectedLotId] = useState(null);
+  const [selectedCaravana, setSelectedCaravana] = useState(null);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
   const lastSyncedData = useRef("");
@@ -306,6 +307,12 @@ function App() {
   const goLot = (id) => {
     setSelectedLotId(id);
     setPage("lot");
+  };
+
+  const openCaravana = (caravana) => {
+    setSelectedCaravana(caravana);
+    setSearch("");
+    setPage("caravanas");
   };
 
   const addLot = (lot) => {
@@ -497,7 +504,13 @@ function App() {
         )}
 
         {page === "caravanas" && (
-          <Caravanas data={data} search={search} goLot={goLot} />
+          <Caravanas
+            data={data}
+            search={search}
+            goLot={goLot}
+            selectedCaravana={selectedCaravana}
+            setSelectedCaravana={setSelectedCaravana}
+          />
         )}
 
         {page === "lot" && selectedLot && (
@@ -512,6 +525,7 @@ function App() {
             deleteLot={deleteLot}
             setPage={setPage}
             goLot={goLot}
+            openCaravana={openCaravana}
             canEdit={isOwner}
           />
         )}
@@ -688,8 +702,7 @@ function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
   );
 }
 
-function Caravanas({ data, search, goLot }) {
-  const [selectedCaravana, setSelectedCaravana] = useState(null);
+function Caravanas({ data, search, goLot, selectedCaravana, setSelectedCaravana }) {
   const animals = useMemo(() => {
     const grouped = new Map();
     const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
@@ -821,7 +834,7 @@ function Caravanas({ data, search, goLot }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, canEdit }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, canEdit }) {
   const [tab, setTab] = useState("summary");
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
@@ -938,7 +951,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 <thead><tr><th>Caravana</th><th>Lote actual</th><th>Pesajes</th><th>Inicial</th><th>Actual</th><th>Ganancia</th><th>Días</th><th>Ganancia diaria</th></tr></thead>
                 <tbody>{animals.map((a) => (
                   <tr key={a.caravana}>
-                    <td><b>{a.caravana}</b></td>
+                    <td><button className="link-button" onClick={() => openCaravana(a.caravana)}>{a.caravana}</button></td>
                     <td>{a.currentLotId ? <button className="link-button" onClick={() => goLot(a.currentLotId)}>{a.currentLot}</button> : a.currentLot}</td>
                     <td>{a.count}</td>
                     <td>{a.initialWeight.toFixed(1)} kg</td>
@@ -989,7 +1002,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
                   <tr key={w.id}>
                     <td>{formatDate(w.date)}</td>
-                    <td><b>{w.caravana}</b></td>
+                    <td><button className="link-button" onClick={() => openCaravana(w.caravana)}>{w.caravana}</button></td>
                     <td>{w.weight.toFixed(1)} kg</td>
                     {canEdit && <td className="actions">
                       <button
