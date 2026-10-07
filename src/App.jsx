@@ -148,6 +148,7 @@ function App() {
   const [animalReturnTab, setAnimalReturnTab] = useState("summary");
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
+  const [weightImportPreview, setWeightImportPreview] = useState(null);
   const lastSyncedData = useRef("");
   const isOwner = role === "owner";
 
@@ -371,25 +372,63 @@ function App() {
 
   const importWeights = async (file, lotId) => {
     if (!isOwner) return;
-    const rows = await readSpreadsheet(file);
-    const mapped = mapWeightRows(rows);
-    const newRows = mapped.map((r) => ({
-      ...r,
-      id: crypto.randomUUID(),
-      lotId,
-    }));
+    try {
+      const rows = await readSpreadsheet(file);
+      const mapped = mapWeightRows(rows);
+      const uniqueRows = new Map();
+      let duplicateCount = 0;
+      const weighingKey = (row) => JSON.stringify([row.caravana, row.date]);
+
+      mapped.forEach((row) => {
+        const key = weighingKey(row);
+        if (uniqueRows.has(key)) duplicateCount += 1;
+        uniqueRows.set(key, row);
+      });
+
+      const existingRows = new Map(
+        data.weighings
+          .filter((row) => row.lotId === lotId)
+          .map((row) => [weighingKey(row), row])
+      );
+      const previewRows = [...uniqueRows.values()].map((row) => {
+        const existing = existingRows.get(weighingKey(row));
+        return {
+          ...row,
+          id: existing?.id || crypto.randomUUID(),
+          lotId,
+          replacesExisting: Boolean(existing),
+        };
+      });
+
+      setWeightImportPreview({
+        fileName: file.name,
+        lotId,
+        lotName: data.lots.find((lot) => lot.id === lotId)?.name || "Lote",
+        totalRows: rows.length,
+        invalidCount: rows.length - mapped.length,
+        duplicateCount,
+        replacementCount: previewRows.filter((row) => row.replacesExisting).length,
+        rows: previewRows,
+      });
+    } catch (error) {
+      alert(`No se pudo leer el archivo: ${error.message}`);
+    }
+  };
+
+  const confirmWeightImport = () => {
+    if (!isOwner || !weightImportPreview?.rows.length) return;
+    const keys = new Set(weightImportPreview.rows.map((row) => JSON.stringify([row.caravana, row.date])));
+    const newRows = weightImportPreview.rows.map(({ replacesExisting, ...row }) => row);
     setData((prev) => ({
       ...prev,
       weighings: [
         ...prev.weighings.filter(
-          (old) =>
-            !newRows.some(
-              (n) => n.lotId === old.lotId && n.caravana === old.caravana && n.date === old.date
-            )
+          (old) => !(old.lotId === weightImportPreview.lotId && keys.has(JSON.stringify([old.caravana, old.date])))
         ),
         ...newRows,
       ],
     }));
+    setWeightImportPreview(null);
     alert(`Se importaron ${newRows.length} registros de pesaje.`);
   };
 
@@ -549,6 +588,13 @@ function App() {
 
       {modal === "lot" && isOwner && (
         <LotModal onClose={() => setModal(null)} onSave={addLot} />
+      )}
+      {weightImportPreview && isOwner && (
+        <WeightImportPreview
+          preview={weightImportPreview}
+          onCancel={() => setWeightImportPreview(null)}
+          onConfirm={confirmWeightImport}
+        />
       )}
     </div>
   );
@@ -876,6 +922,71 @@ function AnimalDetail({ data, caravana, goLot, onBack }) {
   );
 }
 
+function WeightImportPreview({ preview, onCancel, onConfirm }) {
+  return (
+    <div className="modal-backdrop" onMouseDown={onCancel}>
+      <section
+        className="weight-preview-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="weight-preview-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <h3 id="weight-preview-title">Revisar importación de pesajes</h3>
+            <span>{preview.fileName} · {preview.lotName}</span>
+          </div>
+          <button type="button" title="Cerrar" aria-label="Cerrar vista previa" onClick={onCancel}><X size={19} /></button>
+        </div>
+
+        <div className="import-summary">
+          <div><span>Filas leídas</span><b>{preview.totalRows}</b></div>
+          <div><span>Se importarán</span><b>{preview.rows.length}</b></div>
+          <div><span>Filas inválidas</span><b>{preview.invalidCount}</b></div>
+          <div><span>Duplicadas en archivo</span><b>{preview.duplicateCount}</b></div>
+        </div>
+
+        {preview.replacementCount > 0 && (
+          <p className="import-notice">
+            {preview.replacementCount} pesajes coinciden con caravana y fecha ya guardadas en este lote; se reemplazarán al confirmar.
+          </p>
+        )}
+        {preview.duplicateCount > 0 && (
+          <p className="help">Si una caravana aparece más de una vez en el archivo para la misma fecha, se usará la última fila.</p>
+        )}
+
+        {preview.rows.length === 0 ? (
+          <Empty icon={<FileSpreadsheet />} title="No se encontraron pesajes válidos" text="Revisa que el archivo tenga columnas de caravana y peso." />
+        ) : (
+          <div className="table-wrap weight-preview-table">
+            <table>
+              <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th><th>Resultado</th></tr></thead>
+              <tbody>{preview.rows.map((row) => (
+                <tr key={row.id}>
+                  <td>{formatDate(row.date)}</td>
+                  <td><b>{row.caravana}</b></td>
+                  <td>{row.weight.toFixed(1)} kg</td>
+                  <td className={row.replacesExisting ? "negative" : "positive"}>
+                    {row.replacesExisting ? "Reemplaza existente" : "Nuevo"}
+                  </td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onCancel}>Cancelar</button>
+          <button type="button" className="primary" onClick={onConfirm} disabled={preview.rows.length === 0}>
+            <Upload size={16} /> Importar {preview.rows.length} pesajes
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit }) {
   const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
@@ -934,7 +1045,11 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         {canEdit && <div className="lot-actions">
           <label className="secondary">
             <Upload size={17} /> Importar True-Test
-            <input type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => e.target.files[0] && importWeights(e.target.files[0], lot.id)} />
+            <input type="file" accept=".xlsx,.xls,.csv" hidden onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) importWeights(file, lot.id);
+              event.target.value = "";
+            }} />
           </label>
           <label className="secondary">
             <Wheat size={17} /> Importar comida
