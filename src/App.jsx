@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
+import { supabase } from "./supabase";
 import {
   Beef,
   CalendarDays,
@@ -8,6 +9,8 @@ import {
   FileSpreadsheet,
   Gauge,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Tags,
   Plus,
   Search,
@@ -118,24 +121,187 @@ const emptyData = {
 
 function readStored() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY)) || emptyData;
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    return {
+      lots: Array.isArray(stored?.lots) ? stored.lots : [],
+      weighings: Array.isArray(stored?.weighings) ? stored.weighings : [],
+      feedings: Array.isArray(stored?.feedings) ? stored.feedings : [],
+    };
   } catch {
-    return emptyData;
+    return { lots: [], weighings: [], feedings: [] };
   }
 }
 
 function App() {
-  const [data, setData] = useState(readStored);
+  const [data, setData] = useState(emptyData);
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState("");
+  const [role, setRole] = useState(null);
+  const [dataStatus, setDataStatus] = useState("loading");
+  const [dataError, setDataError] = useState("");
+  const [syncError, setSyncError] = useState("");
   const [page, setPage] = useState("dashboard");
   const [selectedLotId, setSelectedLotId] = useState(null);
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState(null);
+  const lastSyncedData = useRef("");
+  const isOwner = role === "owner";
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
+    if (!supabase) {
+      setAuthLoading(false);
+      return;
+    }
+
+    let active = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setRole(null);
+      setData(emptyData);
+      setDataStatus(nextSession ? "loading" : "idle");
+      setDataError("");
+      setSyncError("");
+      lastSyncedData.current = "";
+    });
+
+    supabase.auth.getSession().then(({ data: result, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setSession(result.session);
+      setAuthLoading(false);
+    }).catch((error) => {
+      if (!active) return;
+      setAuthError(error.message);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase || !session) return;
+    let active = true;
+    setDataStatus("loading");
+    setDataError("");
+
+    const loadSharedData = async () => {
+      const { data: member, error: memberError } = await supabase
+        .from("herd_members")
+        .select("role")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
+      if (memberError) throw memberError;
+      if (!member || !["owner", "viewer"].includes(member.role)) {
+        if (active) setDataStatus("denied");
+        return;
+      }
+
+      const { data: sharedState, error: stateError } = await supabase
+        .from("herd_app_state")
+        .select("data")
+        .eq("id", 1)
+        .maybeSingle();
+      if (stateError) throw stateError;
+
+      let initialData = sharedState?.data;
+      if (!initialData && member.role === "owner") {
+        initialData = readStored();
+        const { error: insertError } = await supabase
+          .from("herd_app_state")
+          .insert({ id: 1, data: initialData });
+        if (insertError) throw insertError;
+      }
+
+      if (!initialData) {
+        if (active) {
+          setRole(member.role);
+          setDataStatus("missing");
+        }
+        return;
+      }
+
+      const nextData = {
+        lots: Array.isArray(initialData.lots) ? initialData.lots : [],
+        weighings: Array.isArray(initialData.weighings) ? initialData.weighings : [],
+        feedings: Array.isArray(initialData.feedings) ? initialData.feedings : [],
+      };
+      if (active) {
+        lastSyncedData.current = JSON.stringify(nextData);
+        setRole(member.role);
+        setData(nextData);
+        setDataStatus("ready");
+      }
+    };
+
+    loadSharedData().catch((error) => {
+      if (!active) return;
+      setDataError(error.message);
+      setDataStatus("error");
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [session]);
+
+  useEffect(() => {
+    if (!supabase || !session || !isOwner || dataStatus !== "ready") return;
+    const serialized = JSON.stringify(data);
+    if (serialized === lastSyncedData.current) return;
+
+    localStorage.setItem(STORAGE_KEY, serialized);
+    const timeout = setTimeout(async () => {
+      const { error } = await supabase
+        .from("herd_app_state")
+        .upsert({ id: 1, data, updated_at: new Date().toISOString() });
+      if (error) {
+        setSyncError(error.message);
+        return;
+      }
+      lastSyncedData.current = serialized;
+      setSyncError("");
+    }, 400);
+
+    return () => clearTimeout(timeout);
+  }, [data, dataStatus, isOwner, session]);
+
+  useEffect(() => {
+    if (!supabase || role !== "viewer" || dataStatus !== "ready") return;
+    let active = true;
+    const refreshSharedData = async () => {
+      const { data: sharedState, error } = await supabase
+        .from("herd_app_state")
+        .select("data")
+        .eq("id", 1)
+        .maybeSingle();
+      if (!active || error || !sharedState?.data) return;
+      const nextData = {
+        lots: Array.isArray(sharedState.data.lots) ? sharedState.data.lots : [],
+        weighings: Array.isArray(sharedState.data.weighings) ? sharedState.data.weighings : [],
+        feedings: Array.isArray(sharedState.data.feedings) ? sharedState.data.feedings : [],
+      };
+      setData((current) => JSON.stringify(current) === JSON.stringify(nextData) ? current : nextData);
+    };
+    const interval = setInterval(refreshSharedData, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [dataStatus, role]);
+
+  useEffect(() => {
+    if (isOwner && dataStatus === "ready") {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+  }, [data, dataStatus, isOwner]);
 
   const selectedLot = data.lots.find((l) => l.id === selectedLotId);
+
+  const signOut = () => supabase?.auth.signOut();
 
   const goLot = (id) => {
     setSelectedLotId(id);
@@ -143,6 +309,7 @@ function App() {
   };
 
   const addLot = (lot) => {
+    if (!isOwner) return;
     const id = crypto.randomUUID();
     setData((prev) => ({ ...prev, lots: [...prev.lots, { ...lot, id }] }));
     setModal(null);
@@ -150,6 +317,7 @@ function App() {
   };
 
   const deleteLot = (id) => {
+    if (!isOwner) return;
     if (!confirm("¿Eliminar este lote y todos sus datos?")) return;
     setData((prev) => ({
       lots: prev.lots.filter((l) => l.id !== id),
@@ -161,6 +329,7 @@ function App() {
   };
 
   const deleteWeighing = (id) => {
+    if (!isOwner) return;
     const weighing = data.weighings.find((row) => row.id === id);
     if (!weighing) return;
     if (!confirm(`¿Eliminar el pesaje de la caravana ${weighing.caravana} (${weighing.weight} kg)?`)) return;
@@ -171,6 +340,7 @@ function App() {
   };
 
   const deleteWeightsByMonth = (lotId, month) => {
+    if (!isOwner) return;
     const monthWeights = data.weighings.filter(
       (row) => row.lotId === lotId && row.date?.startsWith(`${month}-`)
     );
@@ -189,6 +359,7 @@ function App() {
   };
 
   const importWeights = async (file, lotId) => {
+    if (!isOwner) return;
     const rows = await readSpreadsheet(file);
     const mapped = mapWeightRows(rows);
     const newRows = mapped.map((r) => ({
@@ -212,6 +383,7 @@ function App() {
   };
 
   const importFeed = async (file, lotId) => {
+    if (!isOwner) return;
     const rows = await readSpreadsheet(file);
     const mapped = mapFeedRows(rows);
     const newRows = mapped.map((r) => ({
@@ -225,6 +397,28 @@ function App() {
     }));
     alert(`Se importaron ${newRows.length} registros de alimentación.`);
   };
+
+  if (!supabase) {
+    return <InfoScreen title="Falta configurar Supabase" text="Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY en el entorno de la aplicación." />;
+  }
+  if (authLoading) return <InfoScreen title="Conectando" text="Verificando la sesión…" />;
+  if (!session) return <LoginScreen error={authError} onSignIn={async (email, password) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    setAuthError(error?.message || "");
+    return error;
+  }} />;
+  if (dataStatus === "loading" || dataStatus === "idle") {
+    return <InfoScreen title="Cargando datos" text="Conectando con los lotes compartidos…" />;
+  }
+  if (dataStatus === "denied") {
+    return <InfoScreen title="Acceso no habilitado" text="Tu cuenta aún no está incluida en este grupo." action={signOut} actionLabel="Cerrar sesión" />;
+  }
+  if (dataStatus === "missing") {
+    return <InfoScreen title="Datos aún no inicializados" text="El propietario debe iniciar sesión primero para preparar los datos compartidos." action={signOut} actionLabel="Cerrar sesión" />;
+  }
+  if (dataStatus === "error") {
+    return <InfoScreen title="No se pudieron cargar los datos" text={dataError} action={signOut} actionLabel="Cerrar sesión" />;
+  }
 
   return (
     <div className="app-shell">
@@ -249,12 +443,15 @@ function App() {
           </button>
         </nav>
 
-        <button className="new-lot-sidebar" onClick={() => setModal("lot")}>
-          <Plus size={18} /> Nuevo lote
-        </button>
+        {isOwner && (
+          <button className="new-lot-sidebar" onClick={() => setModal("lot")}>
+            <Plus size={18} /> Nuevo lote
+          </button>
+        )}
 
         <div className="sidebar-footer">
-          <span>Datos guardados localmente</span>
+          <span>{isOwner ? "Propietario · puede editar" : "Solo lectura"}</span>
+          <button type="button" onClick={signOut}><LogOut size={15} /> Cerrar sesión</button>
         </div>
       </aside>
 
@@ -289,12 +486,14 @@ function App() {
           )}
         </header>
 
+        {syncError && <div className="sync-error" role="alert">No se pudo guardar en la nube: {syncError}</div>}
+
         {page === "dashboard" && (
-          <Dashboard data={data} goLot={goLot} setModal={setModal} />
+          <Dashboard data={data} goLot={goLot} setModal={setModal} canEdit={isOwner} />
         )}
 
         {page === "lots" && (
-          <Lots data={data} goLot={goLot} setModal={setModal} deleteLot={deleteLot} />
+          <Lots data={data} goLot={goLot} setModal={setModal} deleteLot={deleteLot} canEdit={isOwner} />
         )}
 
         {page === "caravanas" && (
@@ -312,18 +511,72 @@ function App() {
             deleteWeightsByMonth={deleteWeightsByMonth}
             deleteLot={deleteLot}
             setPage={setPage}
+            canEdit={isOwner}
           />
         )}
       </main>
 
-      {modal === "lot" && (
+      {modal === "lot" && isOwner && (
         <LotModal onClose={() => setModal(null)} onSave={addLot} />
       )}
     </div>
   );
 }
 
-function Dashboard({ data, goLot, setModal }) {
+function LoginScreen({ error, onSignIn }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setFormError("");
+    try {
+      await onSignIn(email.trim(), password);
+    } catch (submitError) {
+      setFormError(submitError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="auth-page">
+      <form className="auth-panel" onSubmit={submit}>
+        <div className="brand-icon"><Beef size={22} /></div>
+        <h1>Control de Ganado</h1>
+        <p>Inicia sesión para consultar los lotes compartidos.</p>
+        <label>Correo electrónico
+          <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
+        </label>
+        <label>Contraseña
+          <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+        </label>
+        {(error || formError) && <p className="auth-error" role="alert">{error || formError}</p>}
+        <button className="primary" type="submit" disabled={busy}>
+          <LogIn size={17} /> {busy ? "Ingresando…" : "Iniciar sesión"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+function InfoScreen({ title, text, action, actionLabel }) {
+  return (
+    <main className="auth-page">
+      <section className="auth-panel">
+        <div className="brand-icon"><Beef size={22} /></div>
+        <h1>{title}</h1>
+        <p>{text}</p>
+        {action && <button className="secondary" type="button" onClick={action}>{actionLabel}</button>}
+      </section>
+    </main>
+  );
+}
+
+function Dashboard({ data, goLot, setModal, canEdit }) {
   const totalAnimals = data.lots.reduce((sum, l) => {
     const latest = latestWeightByLot(data.weighings, l.id);
     return sum + latest.length;
@@ -350,7 +603,7 @@ function Dashboard({ data, goLot, setModal }) {
           <h2>Todo el campo en un solo lugar.</h2>
           <p>Importá los pesajes de True-Test y relacioná la evolución con la alimentación de cada lote.</p>
         </div>
-        <button className="primary" onClick={() => setModal("lot")}><Plus size={18} /> Crear lote</button>
+        {canEdit && <button className="primary" onClick={() => setModal("lot")}><Plus size={18} /> Crear lote</button>}
       </div>
 
       <div className="stats-grid">
@@ -363,7 +616,7 @@ function Dashboard({ data, goLot, setModal }) {
       <section className="section">
         <div className="section-title">
           <div><h3>Mis lotes</h3><span>Acceso rápido a la información</span></div>
-          <button className="ghost" onClick={() => setModal("lot")}><Plus size={16} /> Nuevo lote</button>
+          {canEdit && <button className="ghost" onClick={() => setModal("lot")}><Plus size={16} /> Nuevo lote</button>}
         </div>
 
         {data.lots.length === 0 ? (
@@ -395,12 +648,12 @@ function Dashboard({ data, goLot, setModal }) {
   );
 }
 
-function Lots({ data, goLot, setModal, deleteLot }) {
+function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
   return (
     <div className="content">
       <div className="section-title">
         <div><h3>Todos los lotes</h3><span>Creá y administrá tus lotes de ganado.</span></div>
-        <button className="primary" onClick={() => setModal("lot")}><Plus size={18} /> Nuevo lote</button>
+        {canEdit && <button className="primary" onClick={() => setModal("lot")}><Plus size={18} /> Nuevo lote</button>}
       </div>
 
       {data.lots.length === 0 ? (
@@ -421,7 +674,7 @@ function Lots({ data, goLot, setModal, deleteLot }) {
                     <td>{s.avgDaily.toFixed(2)} kg/día</td>
                     <td className="actions">
                       <button title="Abrir" onClick={() => goLot(lot.id)}><ChevronRight size={17} /></button>
-                      <button title="Eliminar" className="danger-icon" onClick={() => deleteLot(lot.id)}><Trash2 size={16} /></button>
+                      {canEdit && <button title="Eliminar" className="danger-icon" onClick={() => deleteLot(lot.id)}><Trash2 size={16} /></button>}
                     </td>
                   </tr>
                 );
@@ -567,7 +820,7 @@ function Caravanas({ data, search, goLot }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, canEdit }) {
   const [tab, setTab] = useState("summary");
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
@@ -608,7 +861,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
           <div className="lot-icon large"><Beef size={24} /></div>
           <div><h2>{lot.name}</h2><span>{lot.category || "Sin categoría"} {lot.notes ? `· ${lot.notes}` : ""}</span></div>
         </div>
-        <div className="lot-actions">
+        {canEdit && <div className="lot-actions">
           <label className="secondary">
             <Upload size={17} /> Importar True-Test
             <input type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => e.target.files[0] && importWeights(e.target.files[0], lot.id)} />
@@ -617,7 +870,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             <Wheat size={17} /> Importar comida
             <input type="file" accept=".xlsx,.xls,.csv" hidden onChange={(e) => e.target.files[0] && importFeed(e.target.files[0], lot.id)} />
           </label>
-        </div>
+        </div>}
       </div>
 
       <div className="tabs">
@@ -689,7 +942,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         <section className="panel">
           <div className="panel-title">
             <div><h3>Historial de pesajes</h3><span>Comparación por número de caravana</span></div>
-            {weightMonths.length > 0 && (
+            {canEdit && weightMonths.length > 0 && (
               <div className="month-delete">
                 <select
                   aria-label="Mes de pesaje que se eliminará"
@@ -716,13 +969,13 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th>{canEdit && <th>Acciones</th>}</tr></thead>
                 <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
                   <tr key={w.id}>
                     <td>{formatDate(w.date)}</td>
                     <td><b>{w.caravana}</b></td>
                     <td>{w.weight.toFixed(1)} kg</td>
-                    <td className="actions">
+                    {canEdit && <td className="actions">
                       <button
                         type="button"
                         className="danger-icon"
@@ -732,7 +985,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                       >
                         <Trash2 size={16} />
                       </button>
-                    </td>
+                    </td>}
                   </tr>
                 ))}</tbody>
               </table>
@@ -769,7 +1022,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         </section>
       )}
 
-      <button className="delete-lot" onClick={() => deleteLot(lot.id)}><Trash2 size={16} /> Eliminar lote</button>
+      {canEdit && <button className="delete-lot" onClick={() => deleteLot(lot.id)}><Trash2 size={16} /> Eliminar lote</button>}
     </div>
   );
 }

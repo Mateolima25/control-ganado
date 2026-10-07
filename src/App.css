@@ -101,6 +101,20 @@ tr:last-child td { border-bottom: 0; }
 .modal label { display: block; font-size: 12px; color: #aab4be; margin-bottom: 13px; }
 .modal input, .modal select { width: 100%; margin-top: 7px; background: #0c1116; color: #e5e7eb; border: 1px solid #2b343e; border-radius: 8px; padding: 10px; outline: none; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.auth-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #0b0f14; }
+.auth-panel { width: min(410px, 100%); padding: 28px; border: 1px solid #2a333d; border-radius: 12px; background: #11171e; }
+.auth-panel .brand-icon { margin-bottom: 16px; }
+.auth-panel h1 { margin: 0 0 7px; font-size: 23px; }
+.auth-panel > p { margin: 0 0 21px; color: #84909e; font-size: 13px; line-height: 1.5; }
+.auth-panel label { display: grid; gap: 7px; margin: 0 0 14px; color: #aab4be; font-size: 12px; }
+.auth-panel input { width: 100%; padding: 11px; border: 1px solid #2b343e; border-radius: 8px; outline: none; background: #0c1116; color: #e5e7eb; }
+.auth-panel input:focus { border-color: #7ee29b; }
+.auth-panel .primary { width: 100%; justify-content: center; margin-top: 4px; }
+.auth-panel .primary:disabled { cursor: wait; opacity: .7; }
+.auth-panel .auth-error { margin: 0 0 14px; color: #f08a8a; font-size: 12px; }
+.auth-panel .secondary { margin-top: 3px; }
+.sidebar-footer button { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding: 0; border: 0; background: transparent; color: #aab4be; font-size: 12px; }
+.sync-error { margin: 16px 34px 0; padding: 11px 14px; border: 1px solid #553237; border-radius: 8px; background: #241719; color: #f08a8a; font-size: 12px; }
 @media (max-width: 1000px) {
   .sidebar { width: 210px; }
   .main { margin-left: 210px; width: calc(100% - 210px); }
@@ -113,8 +127,9 @@ tr:last-child td { border-bottom: 0; }
   .app-shell { display: block; }
   .main { margin: 0; width: 100%; }
   .sidebar nav { grid-template-columns: 1fr 1fr; }
-  .sidebar-footer { display: none; }
+  .sidebar-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; }
   .topbar, .content { padding-left: 17px; padding-right: 17px; }
+  .sync-error { margin-left: 17px; margin-right: 17px; }
   .topbar { position: static; align-items: flex-start; flex-direction: column; }
   .search-box { width: 100%; }
   .hero { flex-direction: column; align-items: flex-start; }
