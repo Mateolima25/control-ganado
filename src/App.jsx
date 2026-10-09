@@ -2377,11 +2377,23 @@ function animalStats(rows, caravana) {
 function DeathModal({ animals, onClose, onSave }) {
   const today = new Date();
   const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const [caravana, setCaravana] = useState(animals[0]?.caravana || "");
+  const [caravanaQuery, setCaravanaQuery] = useState("");
+  const [caravana, setCaravana] = useState("");
   const [date, setDate] = useState(todayString);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const animal = animals.find((row) => row.caravana === caravana);
+  const matchingAnimals = caravanaQuery.trim() && !animal
+    ? animals
+      .filter((row) => row.caravanaAliases.some((alias) => normalize(alias).includes(normalize(caravanaQuery))))
+      .sort((a, b) => {
+        const query = normalize(caravanaQuery);
+        const aExact = a.caravanaAliases.some((alias) => normalize(alias) === query);
+        const bExact = b.caravanaAliases.some((alias) => normalize(alias) === query);
+        return Number(bExact) - Number(aExact) || a.caravana.localeCompare(b.caravana);
+      })
+      .slice(0, 8)
+    : [];
 
   const submit = (event) => {
     event.preventDefault();
@@ -2407,10 +2419,45 @@ function DeathModal({ animals, onClose, onSave }) {
           <div><h3>Registrar muerte</h3><span>El animal se descontará de los activos, sin borrar su historial.</span></div>
           <button type="button" aria-label="Cerrar" onClick={onClose}><X /></button>
         </div>
-        <label>Caravana
-          <select value={caravana} onChange={(event) => setCaravana(event.target.value)} required>
-            {animals.map((row) => <option key={row.caravana} value={row.caravana}>{row.caravana} · {row.currentLot}</option>)}
-          </select>
+        <label>Buscar caravana
+          <div className="animal-picker">
+            <input
+              type="search"
+              role="combobox"
+              aria-label="Buscar caravana"
+              aria-autocomplete="list"
+              aria-expanded={matchingAnimals.length > 0}
+              aria-controls="death-animal-results"
+              autoComplete="off"
+              value={caravanaQuery}
+              onChange={(event) => {
+                setCaravanaQuery(event.target.value);
+                setCaravana("");
+              }}
+              placeholder="Escribí el número de caravana"
+            />
+            {matchingAnimals.length > 0 && (
+              <div id="death-animal-results" className="animal-picker-results" role="listbox">
+                {matchingAnimals.map((row) => (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={false}
+                    key={row.caravana}
+                    onClick={() => {
+                      setCaravana(row.caravana);
+                      setCaravanaQuery(row.caravana);
+                      setError("");
+                    }}
+                  >
+                    <b>{row.caravana}</b><span>{row.currentLot}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {caravana && animal && <span className="animal-picker-selected">Seleccionada: {animal.caravana} · {animal.currentLot}</span>}
+          {caravanaQuery.trim() && !animal && matchingAnimals.length === 0 && <span className="animal-picker-hint">No se encontraron caravanas que coincidan.</span>}
         </label>
         <label>Lote asociado<input value={animal?.currentLot || ""} readOnly /></label>
         <label>Fecha de muerte<input type="date" value={date} min={animal?.lastEventDate || undefined} max={todayString} onChange={(event) => setDate(event.target.value)} required /></label>
