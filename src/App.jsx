@@ -1199,6 +1199,32 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
   const weightMonths = [...new Set(weights.map((weight) => weight.date?.slice(0, 7)).filter(Boolean))].sort().reverse();
+  const dailyWeightAverages = [...weights.reduce((groups, weighing) => {
+    const date = weighing.date || "";
+    if (!date) return groups;
+    const day = groups.get(date) || {
+      date,
+      count: 0,
+      total: 0,
+      min: weighing.weight,
+      max: weighing.weight,
+    };
+    day.count += 1;
+    day.total += weighing.weight;
+    day.min = Math.min(day.min, weighing.weight);
+    day.max = Math.max(day.max, weighing.weight);
+    groups.set(date, day);
+    return groups;
+  }, new Map()).values()].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const monthlyWeightAverages = [...weights.reduce((groups, weighing) => {
+    const month = weighing.date?.slice(0, 7);
+    if (!month) return groups;
+    const summary = groups.get(month) || { month, count: 0, total: 0 };
+    summary.count += 1;
+    summary.total += weighing.weight;
+    groups.set(month, summary);
+    return groups;
+  }, new Map()).values()].sort((a, b) => b.month.localeCompare(a.month));
   const activeWeightMonth = weightMonths.includes(selectedWeightMonth)
     ? selectedWeightMonth
     : weightMonths[0] || "";
@@ -1279,6 +1305,29 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
               <p className="help">Para calcular consumo por animal/día, el archivo debe tener animales y días transcurridos.</p>
             </section>
           </div>
+
+          <section className="panel daily-weights">
+            <div className="panel-title">
+              <div><h3>Promedio de peso por fecha</h3><span>Promedio de los animales pesados cada día</span></div>
+              <span>{dailyWeightAverages.length} fechas</span>
+            </div>
+            {dailyWeightAverages.length ? (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Pesajes</th><th>Peso promedio</th><th>Mínimo</th><th>Máximo</th></tr></thead>
+                  <tbody>{dailyWeightAverages.map((day) => (
+                    <tr key={day.date}>
+                      <td>{formatDate(day.date)}</td>
+                      <td>{day.count}</td>
+                      <td><b>{(day.total / day.count).toFixed(1)} kg</b></td>
+                      <td>{day.min.toFixed(1)} kg</td>
+                      <td>{day.max.toFixed(1)} kg</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            ) : <Empty icon={<Gauge />} title="Sin pesajes con fecha" text="Importá pesajes con fecha para ver el promedio diario." />}
+          </section>
         </>
       )}
 
@@ -1338,29 +1387,49 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
           {weights.length === 0 ? (
             <Empty icon={<FileSpreadsheet />} title="No hay pesajes" text="Importá el Excel/CSV de True-Test." />
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th>{canEdit && <th>Acciones</th>}</tr></thead>
-                <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
-                  <tr key={w.id}>
-                    <td>{formatDate(w.date)}</td>
-                    <td><button className="link-button" onClick={() => openCaravana(resolveCurrentCaravana(data.caravanaChanges || [], w.caravana), "lot", "weights")}>{w.recordedCaravana || w.caravana}</button></td>
-                    <td>{w.weight.toFixed(1)} kg</td>
-                    {canEdit && <td className="actions">
-                      <button
-                        type="button"
-                        className="danger-icon"
-                        title="Eliminar este pesaje"
-                        aria-label={`Eliminar pesaje de la caravana ${w.caravana}`}
-                        onClick={() => deleteWeighing(w.id)}
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </td>}
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+            <>
+              <div className="monthly-weights">
+                <h4>Promedio de peso por mes</h4>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Mes</th><th>Pesajes</th><th>Peso promedio</th></tr></thead>
+                    <tbody>{monthlyWeightAverages.map((month) => (
+                      <tr key={month.month}>
+                        <td>{new Date(`${month.month}-01T12:00:00`).toLocaleDateString("es-AR", {
+                          month: "long",
+                          year: "numeric",
+                        })}</td>
+                        <td>{month.count}</td>
+                        <td><b>{(month.total / month.count).toFixed(1)} kg</b></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th>{canEdit && <th>Acciones</th>}</tr></thead>
+                  <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
+                    <tr key={w.id}>
+                      <td>{formatDate(w.date)}</td>
+                      <td><button className="link-button" onClick={() => openCaravana(resolveCurrentCaravana(data.caravanaChanges || [], w.caravana), "lot", "weights")}>{w.recordedCaravana || w.caravana}</button></td>
+                      <td>{w.weight.toFixed(1)} kg</td>
+                      {canEdit && <td className="actions">
+                        <button
+                          type="button"
+                          className="danger-icon"
+                          title="Eliminar este pesaje"
+                          aria-label={`Eliminar pesaje de la caravana ${w.caravana}`}
+                          onClick={() => deleteWeighing(w.id)}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>}
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </>
           )}
         </section>
       )}
