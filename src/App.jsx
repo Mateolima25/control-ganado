@@ -1228,6 +1228,9 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const activeWeightMonth = weightMonths.includes(selectedWeightMonth)
     ? selectedWeightMonth
     : weightMonths[0] || "";
+  const visibleWeights = selectedWeightMonth === "all" || !activeWeightMonth
+    ? weights
+    : weights.filter((weight) => weight.date?.startsWith(`${activeWeightMonth}-`));
   const feeds = data.feedings.filter((f) => f.lotId === lot.id);
   const stats = lotStats(data, lot.id);
 
@@ -1389,13 +1392,14 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         <section className="panel">
           <div className="panel-title">
             <div><h3>Historial de pesajes</h3><span>Comparación por número de caravana</span></div>
-            {canEdit && weightMonths.length > 0 && (
+            {weightMonths.length > 0 && (
               <div className="month-delete">
                 <select
-                  aria-label="Mes de pesaje que se eliminará"
-                  value={activeWeightMonth}
+                  aria-label="Filtrar pesajes por mes"
+                  value={selectedWeightMonth === "all" ? "all" : activeWeightMonth}
                   onChange={(event) => setSelectedWeightMonth(event.target.value)}
                 >
+                  <option value="all">Todos los meses</option>
                   {weightMonths.map((month) => (
                     <option key={month} value={month}>
                       {new Date(`${month}-01T12:00:00`).toLocaleDateString("es-AR", {
@@ -1405,9 +1409,11 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                     </option>
                   ))}
                 </select>
-                <button type="button" onClick={() => deleteWeightsByMonth(lot.id, activeWeightMonth)}>
-                  <Trash2 size={15} /> Eliminar mes
-                </button>
+                {canEdit && selectedWeightMonth !== "all" && (
+                  <button type="button" onClick={() => deleteWeightsByMonth(lot.id, activeWeightMonth)}>
+                    <Trash2 size={15} /> Eliminar mes
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1418,7 +1424,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th>{canEdit && <th>Acciones</th>}</tr></thead>
-                  <tbody>{weights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
+                  <tbody>{visibleWeights.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((w) => (
                     <tr key={w.id}>
                       <td>{formatDate(w.date)}</td>
                       <td><button className="link-button" onClick={() => openCaravana(resolveCurrentCaravana(data.caravanaChanges || [], w.caravana), "lot", "weights")}>{w.recordedCaravana || w.caravana}</button></td>
