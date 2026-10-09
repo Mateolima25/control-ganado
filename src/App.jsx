@@ -1197,6 +1197,7 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
 function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit }) {
   const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
+  const [selectedSummaryMonth, setSelectedSummaryMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
   const weightMonths = [...new Set(weights.map((weight) => weight.date?.slice(0, 7)).filter(Boolean))].sort().reverse();
   const dailyWeightAverages = [...weights.reduce((groups, weighing) => {
@@ -1216,6 +1217,10 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     groups.set(date, day);
     return groups;
   }, new Map()).values()].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const activeSummaryMonth = weightMonths.includes(selectedSummaryMonth) ? selectedSummaryMonth : "";
+  const visibleDailyWeightAverages = activeSummaryMonth
+    ? dailyWeightAverages.filter((day) => day.date.startsWith(`${activeSummaryMonth}-`))
+    : dailyWeightAverages;
   const monthlyWeightAverages = [...weights.reduce((groups, weighing) => {
     const month = weighing.date?.slice(0, 7);
     if (!month) return groups;
@@ -1309,13 +1314,30 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
           <section className="panel daily-weights">
             <div className="panel-title">
               <div><h3>Promedio de peso por fecha</h3><span>Promedio de los animales pesados cada día</span></div>
-              <span>{dailyWeightAverages.length} fechas</span>
+              <div className="daily-weight-controls">
+                <select
+                  aria-label="Filtrar promedios por mes"
+                  value={activeSummaryMonth}
+                  onChange={(event) => setSelectedSummaryMonth(event.target.value)}
+                >
+                  <option value="">Todos los meses</option>
+                  {weightMonths.map((month) => (
+                    <option key={month} value={month}>
+                      {new Date(`${month}-01T12:00:00`).toLocaleDateString("es-AR", {
+                        month: "long",
+                        year: "numeric",
+                      })}
+                    </option>
+                  ))}
+                </select>
+                <span>{visibleDailyWeightAverages.length} fechas</span>
+              </div>
             </div>
-            {dailyWeightAverages.length ? (
+            {visibleDailyWeightAverages.length ? (
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Fecha</th><th>Pesajes</th><th>Peso promedio</th><th>Mínimo</th><th>Máximo</th></tr></thead>
-                  <tbody>{dailyWeightAverages.map((day) => (
+                  <tbody>{visibleDailyWeightAverages.map((day) => (
                     <tr key={day.date}>
                       <td>{formatDate(day.date)}</td>
                       <td>{day.count}</td>
