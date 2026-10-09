@@ -1291,13 +1291,13 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     (!evolutionStartDate || date >= evolutionStartDate) &&
     (!evolutionEndDate || date <= evolutionEndDate)
   );
-  const comparisonDates = dailyWeightAverages.map((day) => day.date).sort().reverse();
+  const comparisonDates = dailyWeightAverages.map((day) => day.date).sort();
   const activeComparisonStart = comparisonDates.includes(comparisonStart)
     ? comparisonStart
     : comparisonDates[0] || "";
   const activeComparisonEnd = comparisonDates.includes(comparisonEnd) && comparisonEnd !== activeComparisonStart
     ? comparisonEnd
-    : comparisonDates.find((date) => date !== activeComparisonStart) || "";
+    : comparisonDates.slice().reverse().find((date) => date !== activeComparisonStart) || "";
   const comparisonA = weightByDate.get(activeComparisonStart);
   const comparisonB = weightByDate.get(activeComparisonEnd);
   const comparisonDifference = comparisonA && comparisonB
