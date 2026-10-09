@@ -1273,6 +1273,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         <button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>Resumen</button>
         <button className={tab === "animals" ? "active" : ""} onClick={() => setTab("animals")}>Animales</button>
         <button className={tab === "weights" ? "active" : ""} onClick={() => setTab("weights")}>Pesajes</button>
+        <button className={tab === "averages" ? "active" : ""} onClick={() => setTab("averages")}>Promedios</button>
         <button className={tab === "feed" ? "active" : ""} onClick={() => setTab("feed")}>Alimentación</button>
       </div>
 
@@ -1438,6 +1439,28 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 </table>
               </div>
             </>
+          )}
+        </section>
+      )}
+
+      {tab === "averages" && (
+        <section className="panel">
+          <div className="panel-title"><div><h3>Promedio de peso por fecha</h3><span>Promedio de todos los animales pesados del lote en cada fecha</span></div></div>
+          {dailyWeightAverages.length === 0 ? (
+            <Empty icon={<Gauge />} title="Sin pesajes con fecha" text="Importá pesajes con fecha para ver los promedios del lote." />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Fecha</th><th>Animales pesados</th><th>Peso promedio del lote</th></tr></thead>
+                <tbody>{dailyWeightAverages.map((day) => (
+                  <tr key={day.date}>
+                    <td>{formatDate(day.date)}</td>
+                    <td>{day.count}</td>
+                    <td><b>{(day.total / day.count).toFixed(1)} kg</b></td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
           )}
         </section>
       )}
