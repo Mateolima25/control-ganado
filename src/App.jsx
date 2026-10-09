@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   LogIn,
   LogOut,
+  Pencil,
   Tags,
   Plus,
   Search,
@@ -395,6 +396,36 @@ function App() {
     }));
   };
 
+  const saveWeighing = (id, changes) => {
+    if (!isOwner) return;
+    setData((prev) => ({
+      ...prev,
+      weighings: prev.weighings.map((row) => row.id === id ? { ...row, ...changes } : row),
+    }));
+  };
+
+  const saveFeeding = (lotId, feeding) => {
+    if (!isOwner) return;
+    const id = feeding.id || crypto.randomUUID();
+    setData((prev) => ({
+      ...prev,
+      feedings: feeding.id
+        ? prev.feedings.map((row) => row.id === id ? { ...feeding, lotId, id } : row)
+        : [...prev.feedings, { ...feeding, lotId, id }],
+    }));
+  };
+
+  const deleteFeeding = (id) => {
+    if (!isOwner) return;
+    const feeding = data.feedings.find((row) => row.id === id);
+    if (!feeding) return;
+    if (!confirm(`¿Eliminar el registro de alimentación del ${formatDate(feeding.date)}?`)) return;
+    setData((prev) => ({
+      ...prev,
+      feedings: prev.feedings.filter((row) => row.id !== id),
+    }));
+  };
+
   const deleteWeightsByMonth = (lotId, month) => {
     if (!isOwner) return;
     const monthWeights = data.weighings.filter(
@@ -724,6 +755,9 @@ function App() {
             importWeights={importWeights}
             importFeed={importFeed}
             deleteWeighing={deleteWeighing}
+            saveWeighing={saveWeighing}
+            saveFeeding={saveFeeding}
+            deleteFeeding={deleteFeeding}
             deleteWeightsByMonth={deleteWeightsByMonth}
             deleteLot={deleteLot}
             setPage={setPage}
@@ -1435,9 +1469,11 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit, alertSettings }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, saveWeighing, saveFeeding, deleteFeeding, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit, alertSettings }) {
   const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
+  const [editingWeighing, setEditingWeighing] = useState(null);
+  const [editingFeeding, setEditingFeeding] = useState(undefined);
   const [evolutionStartDate, setEvolutionStartDate] = useState("");
   const [evolutionEndDate, setEvolutionEndDate] = useState("");
   const [comparisonStart, setComparisonStart] = useState("");
@@ -1929,6 +1965,14 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                       {canEdit && <td className="actions">
                         <button
                           type="button"
+                          title="Editar este pesaje"
+                          aria-label={`Editar pesaje de la caravana ${w.caravana}`}
+                          onClick={() => setEditingWeighing(w)}
+                        >
+                          <Pencil size={16} />
+                        </button>
+                        <button
+                          type="button"
                           className="danger-icon"
                           title="Eliminar este pesaje"
                           aria-label={`Eliminar pesaje de la caravana ${w.caravana}`}
@@ -1970,13 +2014,18 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
 
       {tab === "feed" && (
         <section className="panel">
-          <div className="panel-title"><h3>Alimentación</h3><span>Registros importados</span></div>
+          <div className="panel-title">
+            <div><h3>Alimentación</h3><span>Registros importados y cargados manualmente</span></div>
+            {canEdit && <button type="button" className="primary" onClick={() => setEditingFeeding(null)}>
+              <Plus size={16} /> Cargar comida
+            </button>}
+          </div>
           {feeds.length === 0 ? (
             <Empty icon={<Wheat />} title="No hay registros de comida" text="Importá tu planilla de alimentación." />
           ) : (
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Comederos</th><th>Animales</th><th>Comida kg</th><th>Sal</th><th>Bolsas</th><th>Días</th><th>Kg/animal/día</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Comederos</th><th>Animales</th><th>Comida kg</th><th>Sal</th><th>Bolsas</th><th>Días</th><th>Kg/animal/día</th>{canEdit && <th>Acciones</th>}</tr></thead>
                 <tbody>{feedsWithElapsedDays.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((f) => {
                   const perDay = f.animals && f.days ? f.foodKg / f.animals / f.days : 0;
                   return <tr key={f.id}>
@@ -1988,12 +2037,41 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                     <td>{f.bags ?? "-"}</td>
                     <td>{f.days ?? "-"}</td>
                     <td>{perDay ? perDay.toFixed(2) : "-"} kg</td>
+                    {canEdit && <td className="actions">
+                      <button type="button" title="Editar registro" aria-label={`Editar alimentación del ${formatDate(f.date)}`} onClick={() => setEditingFeeding(data.feedings.find((row) => row.id === f.id) || f)}>
+                        <Pencil size={16} />
+                      </button>
+                      <button type="button" className="danger-icon" title="Eliminar registro" aria-label={`Eliminar alimentación del ${formatDate(f.date)}`} onClick={() => deleteFeeding(f.id)}>
+                        <Trash2 size={16} />
+                      </button>
+                    </td>}
                   </tr>;
                 })}</tbody>
               </table>
             </div>
           )}
         </section>
+      )}
+
+      {canEdit && editingFeeding !== undefined && (
+        <FeedingModal
+          feeding={editingFeeding}
+          onClose={() => setEditingFeeding(undefined)}
+          onSave={(feeding) => {
+            saveFeeding(lot.id, feeding);
+            setEditingFeeding(undefined);
+          }}
+        />
+      )}
+      {canEdit && editingWeighing && (
+        <WeighingModal
+          weighing={editingWeighing}
+          onClose={() => setEditingWeighing(null)}
+          onSave={(changes) => {
+            saveWeighing(editingWeighing.id, changes);
+            setEditingWeighing(null);
+          }}
+        />
       )}
 
       {canEdit && <button className="delete-lot" onClick={() => deleteLot(lot.id)}><Trash2 size={16} /> Eliminar lote</button>}
@@ -2020,6 +2098,100 @@ function LotModal({ onClose, onSave }) {
         <label>Categoría<select value={category} onChange={(e) => setCategory(e.target.value)}><option>Novillos</option><option>Vaquillonas</option><option>Terneros</option><option>Terneras</option><option>Mixtos</option><option>Otro</option></select></label>
         <label>Observaciones<input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opcional" /></label>
         <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button className="primary" type="submit">Crear lote</button></div>
+      </form>
+    </div>
+  );
+}
+
+function FeedingModal({ feeding, onClose, onSave }) {
+  const [form, setForm] = useState(() => ({
+    date: feeding?.date || new Date().toISOString().slice(0, 10),
+    feeders: feeding?.feeders ?? "",
+    animals: feeding?.animals ?? "",
+    foodKg: feeding?.foodKg ?? "",
+    salt: feeding?.salt ?? "",
+    bags: feeding?.bags ?? "",
+    days: feeding?.days ?? "",
+  }));
+  const [error, setError] = useState("");
+  const update = (field) => (event) => setForm((current) => ({ ...current, [field]: event.target.value }));
+  const numericValue = (value) => value === "" ? null : Number(value);
+
+  const submit = (event) => {
+    event.preventDefault();
+    if (!form.date) {
+      setError("Ingresá la fecha del registro.");
+      return;
+    }
+    const numericFields = ["feeders", "animals", "foodKg", "salt", "bags", "days"];
+    if (numericFields.some((field) => {
+      const value = numericValue(form[field]);
+      return value !== null && (!Number.isFinite(value) || value < 0 || (field === "days" && value === 0));
+    })) {
+      setError("Los valores deben ser números válidos y no negativos. Los días deben ser mayores que cero.");
+      return;
+    }
+    onSave({
+      ...(feeding || {}),
+      date: form.date,
+      feeders: numericValue(form.feeders),
+      animals: numericValue(form.animals),
+      foodKg: numericValue(form.foodKg) ?? 0,
+      salt: numericValue(form.salt),
+      bags: numericValue(form.bags),
+      days: numericValue(form.days),
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>{feeding ? "Editar alimentación" : "Cargar comida"}</h3><span>Ingresá los datos del registro del lote.</span></div>
+          <button type="button" aria-label="Cerrar" onClick={onClose}><X /></button>
+        </div>
+        <label>Fecha<input type="date" required value={form.date} onChange={update("date")} /></label>
+        <div className="form-grid">
+          <label>Comederos<input type="number" min="0" step="1" value={form.feeders} onChange={update("feeders")} /></label>
+          <label>Animales<input type="number" min="0" step="1" value={form.animals} onChange={update("animals")} /></label>
+          <label>Comida (kg)<input type="number" min="0" step="any" value={form.foodKg} onChange={update("foodKg")} /></label>
+          <label>Sal<input type="number" min="0" step="any" value={form.salt} onChange={update("salt")} /></label>
+          <label>Bolsas<input type="number" min="0" step="any" value={form.bags} onChange={update("bags")} /></label>
+          <label>Días<input type="number" min="0.01" step="any" value={form.days} onChange={update("days")} placeholder="Se calcula automáticamente" /></label>
+        </div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button className="primary" type="submit">Guardar</button></div>
+      </form>
+    </div>
+  );
+}
+
+function WeighingModal({ weighing, onClose, onSave }) {
+  const [date, setDate] = useState(weighing.date || "");
+  const [weight, setWeight] = useState(String(weighing.weight ?? ""));
+  const [error, setError] = useState("");
+
+  const submit = (event) => {
+    event.preventDefault();
+    const numericWeight = Number(weight);
+    if (!date || !Number.isFinite(numericWeight) || numericWeight <= 0) {
+      setError("Ingresá una fecha y un peso mayor que cero.");
+      return;
+    }
+    onSave({ date, weight: numericWeight });
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>Editar pesaje</h3><span>Caravana: {weighing.recordedCaravana || weighing.caravana}</span></div>
+          <button type="button" aria-label="Cerrar" onClick={onClose}><X /></button>
+        </div>
+        <label>Fecha<input type="date" required value={date} onChange={(event) => setDate(event.target.value)} /></label>
+        <label>Peso (kg)<input type="number" min="0.01" step="any" required value={weight} onChange={(event) => setWeight(event.target.value)} /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button className="primary" type="submit">Guardar</button></div>
       </form>
     </div>
   );

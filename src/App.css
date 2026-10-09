@@ -149,6 +149,8 @@ tr:last-child td { border-bottom: 0; }
 .modal-head button { border: 0; background: transparent; color: #88939e; }
 .modal label { display: block; font-size: 12px; color: #aab4be; margin-bottom: 13px; }
 .modal input, .modal select { width: 100%; margin-top: 7px; background: #0c1116; color: #e5e7eb; border: 1px solid #2b343e; border-radius: 8px; padding: 10px; outline: none; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 12px; }
+.form-error { margin: 0; color: #f08a8a; font-size: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .weight-preview-modal { width: min(820px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; overflow: hidden; padding: 20px; border: 1px solid #2a333d; border-radius: 12px; background: #11171e; box-shadow: 0 20px 80px rgba(0,0,0,.5); }
 .weight-preview-modal .modal-head { flex: 0 0 auto; margin-bottom: 14px; }
@@ -217,4 +219,5 @@ tr:last-child td { border-bottom: 0; }
   .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .weight-preview-table { max-height: 38vh; }
   .weight-preview-modal .modal-actions { flex-wrap: wrap; }
+  .form-grid { grid-template-columns: 1fr; }
 }
