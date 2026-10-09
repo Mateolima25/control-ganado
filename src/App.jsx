@@ -63,6 +63,9 @@ const normalize = (value = "") =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
+const cleanCaravana = (value) => String(value ?? "").trim().replace(/\s+/g, "");
+const caravanaKey = (value) => normalize(value);
+
 const numberValue = (value) => {
   if (typeof value === "number") {
     // True-Test puede entregar algunos pesos sin el separador decimal.
@@ -439,7 +442,9 @@ function App() {
       alert("No se encontró un animal activo para registrar.");
       return false;
     }
-    if ((data.deaths || []).some((death) => animal.caravanaAliases.includes(death.caravana))) {
+    if ((data.deaths || []).some((death) =>
+      animal.caravanaAliases.some((alias) => caravanaKey(alias) === caravanaKey(death.caravana))
+    )) {
       alert("Esta caravana ya tiene una muerte registrada.");
       return false;
     }
@@ -524,7 +529,7 @@ function App() {
 
   const changeAnimalCaravana = (caravana, nextCaravana, date, reason) => {
     if (!isOwner) return;
-    const normalizedNextCaravana = String(nextCaravana || "").trim();
+    const normalizedNextCaravana = cleanCaravana(nextCaravana);
     const animal = animalRecords(data).find((record) => record.caravana === caravana);
     if (animal?.deceased) {
       alert("No se puede cambiar la caravana de un animal con una muerte registrada.");
@@ -570,7 +575,7 @@ function App() {
       const rows = await readSpreadsheet(file);
       const mapped = mapWeightRows(rows).map((row) => ({
         ...row,
-        recordedCaravana: row.caravana,
+        recordedCaravana: row.recordedCaravana || row.caravana,
         caravana: resolveCurrentCaravana(data.caravanaChanges || [], row.caravana),
       }));
       const uniqueRows = new Map();
@@ -2473,38 +2478,40 @@ function DeathModal({ animals, onClose, onSave }) {
 }
 
 function resolveCurrentCaravana(changes, caravana) {
-  let current = caravana;
+  let current = cleanCaravana(caravana);
   const visited = new Set();
-  while (current && !visited.has(current)) {
-    visited.add(current);
+  while (current && !visited.has(caravanaKey(current))) {
+    visited.add(caravanaKey(current));
     const nextChange = changes
-      .filter((change) => change.fromCaravana === current)
+      .filter((change) => caravanaKey(change.fromCaravana) === caravanaKey(current))
       .slice()
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
       .at(-1);
     if (!nextChange) break;
-    current = nextChange.toCaravana;
+    current = cleanCaravana(nextChange.toCaravana);
   }
   return current;
 }
 
 function caravanaFamily(changes, caravana) {
-  const aliases = new Set([caravana]);
+  const aliases = new Map([[caravanaKey(caravana), cleanCaravana(caravana)]]);
   let expanded = true;
   while (expanded) {
     expanded = false;
     changes.forEach((change) => {
-      if (aliases.has(change.fromCaravana) && !aliases.has(change.toCaravana)) {
-        aliases.add(change.toCaravana);
+      const fromKey = caravanaKey(change.fromCaravana);
+      const toKey = caravanaKey(change.toCaravana);
+      if (aliases.has(fromKey) && !aliases.has(toKey)) {
+        aliases.set(toKey, cleanCaravana(change.toCaravana));
         expanded = true;
       }
-      if (aliases.has(change.toCaravana) && !aliases.has(change.fromCaravana)) {
-        aliases.add(change.fromCaravana);
+      if (aliases.has(toKey) && !aliases.has(fromKey)) {
+        aliases.set(fromKey, cleanCaravana(change.fromCaravana));
         expanded = true;
       }
     });
   }
-  return [...aliases];
+  return [...aliases.values()];
 }
 
 function animalRecords(data) {
@@ -2540,7 +2547,7 @@ function animalRecords(data) {
       .slice()
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const identityChanges = caravanaChanges
-      .filter((change) => resolveCurrentCaravana(caravanaChanges, change.fromCaravana) === caravana)
+      .filter((change) => caravanaKey(resolveCurrentCaravana(caravanaChanges, change.fromCaravana)) === caravanaKey(caravana))
       .slice()
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
     const latestWeight = history[history.length - 1];
@@ -2553,7 +2560,7 @@ function animalRecords(data) {
       .sort()
       .at(-1) || "";
     const death = (data.deaths || []).find((row) =>
-      caravanaFamily(caravanaChanges, row.caravana).includes(caravana)
+      caravanaFamily(caravanaChanges, row.caravana).some((alias) => caravanaKey(alias) === caravanaKey(caravana))
     ) || null;
 
     return {
@@ -2677,12 +2684,17 @@ function findColumn(row, candidates) {
 
 function mapWeightRows(rows) {
   return rows.map((row) => {
-    const caravanaKey = findColumn(row, ["caravana", "eid", "rfid", "vid", "id", "tag", "ear tag", "numero de caravana"]);
+    const caravanaColumn = findColumn(row, ["caravana", "eid", "rfid", "vid", "id", "tag", "ear tag", "numero de caravana"]);
     const weightKey = findColumn(row, ["peso", "weight", "kg", "peso vivo"]);
     const dateKey = findColumn(row, ["fecha", "date", "fecha pesaje", "weighing date"]);
-    const caravana = caravanaKey ? String(row[caravanaKey]).trim() : "";
+    const caravana = caravanaColumn ? cleanCaravana(row[caravanaColumn]) : "";
     const weight = weightKey ? numberValue(row[weightKey]) : null;
-    return { caravana, weight, date: dateValue(dateKey ? row[dateKey] : null) };
+    return {
+      caravana,
+      recordedCaravana: caravanaColumn ? String(row[caravanaColumn]).trim() : "",
+      weight,
+      date: dateValue(dateKey ? row[dateKey] : null),
+    };
   }).filter((r) => r.caravana && r.weight !== null);
 }
 
