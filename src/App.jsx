@@ -35,6 +35,25 @@ import {
 } from "recharts";
 
 const STORAGE_KEY = "control-ganado-v1";
+const ALERT_SETTINGS_KEY = "control-ganado-alert-settings";
+const DEFAULT_ALERT_SETTINGS = {
+  weightLossKg: 1,
+  coveragePercent: 80,
+  feedGapDays: 45,
+};
+
+function readAlertSettings() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(ALERT_SETTINGS_KEY));
+    return {
+      weightLossKg: Number.isFinite(stored?.weightLossKg) ? stored.weightLossKg : DEFAULT_ALERT_SETTINGS.weightLossKg,
+      coveragePercent: Number.isFinite(stored?.coveragePercent) ? stored.coveragePercent : DEFAULT_ALERT_SETTINGS.coveragePercent,
+      feedGapDays: Number.isFinite(stored?.feedGapDays) ? stored.feedGapDays : DEFAULT_ALERT_SETTINGS.feedGapDays,
+    };
+  } catch {
+    return DEFAULT_ALERT_SETTINGS;
+  }
+}
 
 const normalize = (value = "") =>
   String(value)
@@ -154,10 +173,18 @@ function App() {
   const [animalReturnPage, setAnimalReturnPage] = useState("caravanas");
   const [animalReturnTab, setAnimalReturnTab] = useState("summary");
   const [search, setSearch] = useState("");
+  const [alertSettings, setAlertSettings] = useState(readAlertSettings);
   const [modal, setModal] = useState(null);
   const [weightImportPreview, setWeightImportPreview] = useState(null);
   const lastSyncedData = useRef("");
   const isOwner = role === "owner";
+  const globalAnimalResults = useMemo(() => {
+    const query = normalize(search.trim());
+    if (!query) return [];
+    return animalRecords(data)
+      .filter((animal) => animal.caravanaAliases.some((alias) => normalize(alias).includes(query)))
+      .slice(0, 8);
+  }, [data, search]);
 
   useEffect(() => {
     if (!supabase) {
@@ -313,6 +340,10 @@ function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     }
   }, [data, dataStatus, isOwner]);
+
+  useEffect(() => {
+    localStorage.setItem(ALERT_SETTINGS_KEY, JSON.stringify(alertSettings));
+  }, [alertSettings]);
 
   const selectedLot = data.lots.find((l) => l.id === selectedLotId);
 
@@ -592,6 +623,7 @@ function App() {
           <div>
             <h1>
               {page === "dashboard" && "Dashboard"}
+              {page === "comparison" && "Comparativo de lotes"}
               {page === "lots" && "Lotes"}
               {page === "caravanas" && "Caravanas"}
               {page === "lot" && selectedLot?.name}
@@ -606,25 +638,57 @@ function App() {
                 ? "Seguimiento individual de cada animal, aunque cambie de lote."
                     : page === "animal"
                     ? "Historial completo de pesajes y lotes de este animal."
+                : page === "comparison"
+                ? "Compara los indicadores principales de todos tus lotes."
                 : "Pesajes, caravanas, alimentación y evolución."}
             </p>
           </div>
-                  {page !== "dashboard" && page !== "animal" && (
-            <div className="search-box">
+          <div className="topbar-actions">
+            <div className="search-box global-search">
               <Search size={17} />
               <input
-                placeholder="Buscar caravana..."
+                aria-label="Buscar caravana en todo el sistema"
+                placeholder="Buscar caravana en todo el sistema..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+              {search.trim() && globalAnimalResults.length > 0 && (
+                <div className="search-results" role="listbox" aria-label="Resultados de caravanas">
+                  {globalAnimalResults.map((animal) => (
+                    <button
+                      type="button"
+                      role="option"
+                      key={animal.caravana}
+                      onClick={() => openCaravana(animal.caravana)}
+                    >
+                      <b>{animal.caravana}</b>
+                      <span>{animal.currentLot} · {animal.currentWeight.toFixed(1)} kg</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+            <button className="secondary comparison-shortcut" onClick={() => setPage("comparison")}>
+              Comparar lotes
+            </button>
+          </div>
         </header>
 
         {syncError && <div className="sync-error" role="alert">No se pudo guardar en la nube: {syncError}</div>}
 
         {page === "dashboard" && (
-          <Dashboard data={data} goLot={goLot} setModal={setModal} canEdit={isOwner} />
+          <Dashboard
+            data={data}
+            goLot={goLot}
+            setModal={setModal}
+            canEdit={isOwner}
+            alertSettings={alertSettings}
+            setAlertSettings={setAlertSettings}
+          />
+        )}
+
+        {page === "comparison" && (
+          <LotComparison data={data} goLot={goLot} />
         )}
 
         {page === "lots" && (
@@ -667,6 +731,7 @@ function App() {
             openCaravana={openCaravana}
             initialTab={page === "lot" ? animalReturnTab : "summary"}
             canEdit={isOwner}
+            alertSettings={alertSettings}
           />
         )}
       </main>
@@ -738,12 +803,11 @@ function InfoScreen({ title, text, action, actionLabel }) {
   );
 }
 
-function Dashboard({ data, goLot, setModal, canEdit }) {
+function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSettings }) {
   const currentAnimals = animalRecords(data).filter((animal) => animal.currentLotId);
   const totalAnimals = currentAnimals.length;
-  const allLatest = currentAnimals;
-  const avgWeight = allLatest.length
-    ? allLatest.reduce((s, x) => s + x.weight, 0) / allLatest.length
+  const avgWeight = currentAnimals.length
+    ? currentAnimals.reduce((sum, animal) => sum + animal.currentWeight, 0) / currentAnimals.length
     : 0;
 
   const avgDaily = data.lots
@@ -753,6 +817,7 @@ function Dashboard({ data, goLot, setModal, canEdit }) {
   const avgDailyGlobal = avgDaily.length
     ? avgDaily.reduce((a, b) => a + b, 0) / avgDaily.length
     : 0;
+  const warnings = lotAlerts(data, alertSettings);
 
   return (
     <div className="content">
@@ -771,6 +836,36 @@ function Dashboard({ data, goLot, setModal, canEdit }) {
         <Stat icon={<Gauge />} label="Peso promedio actual" value={`${avgWeight.toFixed(1)} kg`} />
         <Stat icon={<Wheat />} label="Ganancia diaria promedio" value={`${avgDailyGlobal.toFixed(2)} kg/día`} />
       </div>
+
+      <section className="panel dashboard-alert-settings">
+        <div className="panel-title">
+          <div><h3>Alertas del establecimiento</h3><span>Los umbrales se guardan en este dispositivo</span></div>
+        </div>
+        <div className="alert-settings-grid">
+          <label>Pérdida promedio para alertar (kg)
+            <input type="number" min="0" step="0.1" value={alertSettings.weightLossKg} onChange={(event) => setAlertSettings((current) => ({ ...current, weightLossKg: Math.max(0, Number(event.target.value) || 0) }))} />
+          </label>
+          <label>Cobertura mínima del pesaje (%)
+            <input type="number" min="1" max="100" step="1" value={alertSettings.coveragePercent} onChange={(event) => setAlertSettings((current) => ({ ...current, coveragePercent: Math.min(100, Math.max(1, Number(event.target.value) || 1)) }))} />
+          </label>
+          <label>Máximo de días sin alimentación
+            <input type="number" min="1" step="1" value={alertSettings.feedGapDays} onChange={(event) => setAlertSettings((current) => ({ ...current, feedGapDays: Math.max(1, Number(event.target.value) || 1) }))} />
+          </label>
+        </div>
+        {warnings.length === 0 ? (
+          <p className="help">No hay alertas con los umbrales actuales.</p>
+        ) : (
+          <div className="dashboard-alert-list">
+            <div className="evolution-alert-heading"><AlertTriangle size={17} /><strong>{warnings.length} avisos para revisar</strong></div>
+            {warnings.slice(0, 8).map((warning) => (
+              <button type="button" key={warning.key} onClick={() => goLot(warning.lotId)}>
+                <b>{warning.lotName} · {formatDate(warning.date)}</b><span>{warning.message}</span>
+              </button>
+            ))}
+            {warnings.length > 8 && <span className="help">Y {warnings.length - 8} avisos más.</span>}
+          </div>
+        )}
+      </section>
 
       <section className="section">
         <div className="section-title">
@@ -802,6 +897,148 @@ function Dashboard({ data, goLot, setModal, canEdit }) {
             })}
           </div>
         )}
+      </section>
+    </div>
+  );
+}
+
+function LotComparison({ data, goLot }) {
+  const [category, setCategory] = useState("all");
+  const [minimumWeight, setMinimumWeight] = useState("");
+  const [maximumWeight, setMaximumWeight] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [lotQuery, setLotQuery] = useState("");
+  const animals = animalRecords(data);
+  const categories = [...new Set(data.lots.map((lot) => lot.category || "Sin categoría"))].sort();
+  const rows = data.lots
+    .filter((lot) => category === "all" || (lot.category || "Sin categoría") === category)
+    .filter((lot) => !lotQuery || normalize(lot.name).includes(normalize(lotQuery)))
+    .map((lot) => {
+      const lotAnimals = animals.filter((animal) => animal.currentLotId === lot.id);
+      const measuredAnimals = lotAnimals.map((animal) => {
+        const measurements = animal.history.filter((weighing) =>
+          weighing.date &&
+          (!startDate || weighing.date >= startDate) &&
+          (!endDate || weighing.date <= endDate)
+        );
+        const relevantMeasurements = startDate || endDate ? measurements : animal.history;
+        return {
+          animal,
+          weighing: relevantMeasurements.at(-1) || null,
+          stats: animalStats(relevantMeasurements, animal.caravana),
+        };
+      }).filter((record) => record.weighing);
+      const avgWeight = measuredAnimals.length
+        ? measuredAnimals.reduce((sum, record) => sum + record.weighing.weight, 0) / measuredAnimals.length
+        : null;
+      const dailyValues = measuredAnimals
+        .filter((record) => record.stats.days > 0)
+        .map((record) => record.stats.daily);
+      const avgDaily = dailyValues.length
+        ? dailyValues.reduce((sum, value) => sum + value, 0) / dailyValues.length
+        : null;
+      const feeds = data.feedings.filter((feed) =>
+        feed.lotId === lot.id &&
+        feed.date &&
+        (!startDate || feed.date >= startDate) &&
+        (!endDate || feed.date <= endDate)
+      );
+      const feedDates = [...new Set(feeds.map((feed) => feed.date))].sort();
+      const elapsedDaysByDate = new Map(feedDates.map((date, index) => [
+        date,
+        index > 0 ? daysBetween(feedDates[index - 1], date) : null,
+      ]));
+      let foodTotal = 0;
+      let animalDays = 0;
+      feeds.forEach((feed) => {
+        const days = feed.days ?? elapsedDaysByDate.get(feed.date);
+        if (feed.foodKg > 0 && feed.animals > 0 && days > 0) {
+          foodTotal += feed.foodKg;
+          animalDays += feed.animals * days;
+        }
+      });
+      const latestDate = measuredAnimals
+        .map((record) => record.weighing.date)
+        .sort()
+        .at(-1) || "";
+      return {
+        lot,
+        animalCount: measuredAnimals.length,
+        avgWeight,
+        avgDaily,
+        foodPerAnimalDay: animalDays > 0 ? foodTotal / animalDays : null,
+        latestDate,
+      };
+    })
+    .filter((row) => {
+      if (row.avgWeight === null) return minimumWeight === "" && maximumWeight === "";
+      return (minimumWeight === "" || row.avgWeight >= Number(minimumWeight)) &&
+        (maximumWeight === "" || row.avgWeight <= Number(maximumWeight));
+    });
+
+  const exportComparison = () => {
+    const worksheet = XLSX.utils.json_to_sheet(rows.map((row) => ({
+      Lote: row.lot.name,
+      Categoría: row.lot.category || "Sin categoría",
+      Animales: row.animalCount,
+      "Peso promedio (kg)": row.avgWeight === null ? "" : Number(row.avgWeight.toFixed(1)),
+      "Ganancia diaria promedio (kg/día)": row.avgDaily === null ? "" : Number(row.avgDaily.toFixed(2)),
+      "Alimentación (kg/animal/día)": row.foodPerAnimalDay === null ? "" : Number(row.foodPerAnimalDay.toFixed(2)),
+      "Fecha último pesaje": row.latestDate ? formatDate(row.latestDate) : "",
+    })));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Comparativo de lotes");
+    XLSX.writeFile(workbook, "comparativo-de-lotes.xlsx");
+  };
+
+  return (
+    <div className="content">
+      <section className="panel">
+        <div className="panel-title">
+          <div><h3>Comparativo de lotes</h3><span>Compara peso, ganancia diaria y alimentación en un mismo período</span></div>
+          <button type="button" className="secondary" onClick={exportComparison}><Download size={16} /> Descargar Excel</button>
+        </div>
+        <div className="comparison-filters">
+          <label>Buscar lote<input value={lotQuery} onChange={(event) => setLotQuery(event.target.value)} placeholder="Nombre del lote" /></label>
+          <label>Categoría<select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <option value="all">Todas</option>
+            {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select></label>
+          <label>Desde<input type="date" value={startDate} max={endDate || undefined} onChange={(event) => setStartDate(event.target.value)} /></label>
+          <label>Hasta<input type="date" value={endDate} min={startDate || undefined} onChange={(event) => setEndDate(event.target.value)} /></label>
+          <label>Peso mínimo (kg)<input type="number" min="0" step="0.1" value={minimumWeight} onChange={(event) => setMinimumWeight(event.target.value)} /></label>
+          <label>Peso máximo (kg)<input type="number" min="0" step="0.1" value={maximumWeight} onChange={(event) => setMaximumWeight(event.target.value)} /></label>
+          <button type="button" className="ghost" onClick={() => {
+            setLotQuery("");
+            setCategory("all");
+            setStartDate("");
+            setEndDate("");
+            setMinimumWeight("");
+            setMaximumWeight("");
+          }}>Limpiar filtros</button>
+        </div>
+        {rows.length === 0 ? (
+          <Empty icon={<ClipboardList />} title="No hay lotes para comparar" text="Cambia los filtros para ver resultados." />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Lote</th><th>Categoría</th><th>Animales pesados</th><th>Peso promedio</th><th>Ganancia diaria</th><th>Comida kg/animal/día</th><th>Último pesaje</th></tr></thead>
+              <tbody>{rows.map((row) => (
+                <tr key={row.lot.id}>
+                  <td><button className="link-button" onClick={() => goLot(row.lot.id)}>{row.lot.name}</button></td>
+                  <td>{row.lot.category || "Sin categoría"}</td>
+                  <td>{row.animalCount}</td>
+                  <td>{row.avgWeight === null ? "-" : `${row.avgWeight.toFixed(1)} kg`}</td>
+                  <td>{row.avgDaily === null ? "-" : `${row.avgDaily.toFixed(2)} kg/día`}</td>
+                  <td>{row.foodPerAnimalDay === null ? "-" : `${row.foodPerAnimalDay.toFixed(2)} kg`}</td>
+                  <td>{row.latestDate ? formatDate(row.latestDate) : "-"}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+        <p className="help comparison-note">Con fechas seleccionadas se toma el último pesaje disponible de cada animal dentro del período.</p>
       </section>
     </div>
   );
@@ -963,6 +1200,8 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
             <Stat icon={<FileSpreadsheet />} label="Pesajes" value={stats.count} />
             <Stat icon={<Gauge />} label="Peso actual" value={`${stats.currentWeight.toFixed(1)} kg`} />
             <Stat icon={<CalendarDays />} label="Ganancia total" value={`${stats.gain >= 0 ? "+" : ""}${stats.gain.toFixed(1)} kg`} />
+            <Stat icon={<Gauge />} label="Ganancia diaria" value={`${stats.daily.toFixed(2)} kg/día`} />
+            <Stat icon={<CalendarDays />} label="Último pesaje" value={formatDate(history.at(-1)?.date)} />
           </div>
 
           {history.length > 0 ? (
@@ -1196,7 +1435,7 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
   );
 }
 
-function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit }) {
+function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit, alertSettings }) {
   const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const [evolutionStartDate, setEvolutionStartDate] = useState("");
@@ -1320,39 +1559,12 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const comparisonDifference = comparisonA && comparisonB
     ? comparisonB.total / comparisonB.count - comparisonA.total / comparisonA.count
     : null;
-  const inEvolutionRange = (date) =>
-    (!evolutionStartDate || date >= evolutionStartDate) &&
-    (!evolutionEndDate || date <= evolutionEndDate);
-  const evolutionAlerts = [];
-  evolutionRows.forEach((row) => {
-    if (!inEvolutionRange(row.date)) return;
-    if (row.weightChange !== null && row.weightChange < 0) {
-      evolutionAlerts.push({
-        key: `weight-${row.date}`,
-        date: row.date,
-        message: `El promedio bajó ${Math.abs(row.weightChange).toFixed(1)} kg respecto del pesaje anterior.`,
-      });
-    }
-    if (row.weighing && stats.animals > 0 && row.weighing.count < stats.animals * 0.8) {
-      evolutionAlerts.push({
-        key: `coverage-${row.date}`,
-        date: row.date,
-        message: `Se pesaron ${row.weighing.count} de ${stats.animals} animales actuales (menos del 80%).`,
-      });
-    }
-  });
-  const weighingDates = dailyWeightAverages.map((day) => day.date).sort();
-  weighingDates.slice(1).forEach((date, index) => {
-    const previousDate = weighingDates[index];
-    const hasFeeding = feedDates.some((feedDate) => feedDate > previousDate && feedDate <= date);
-    if (!hasFeeding && inEvolutionRange(date)) {
-      evolutionAlerts.push({
-        key: `feeding-gap-${previousDate}-${date}`,
-        date,
-        message: `No hay registros de alimentación entre ${formatDate(previousDate)} y ${formatDate(date)}.`,
-      });
-    }
-  });
+  const evolutionAlerts = lotAlerts(data, alertSettings)
+    .filter((alert) => alert.lotId === lot.id)
+    .filter((alert) =>
+      (!evolutionStartDate || alert.date >= evolutionStartDate) &&
+      (!evolutionEndDate || alert.date <= evolutionEndDate)
+    );
   const downloadEvolutionReport = () => {
     const workbook = XLSX.utils.book_new();
     const evolutionSheet = filteredEvolutionRows.map((row) => ({
@@ -1943,6 +2155,80 @@ function lotStats(data, lotId) {
   const validDaily = animals.filter((a) => a.days > 0).map((a) => a.daily);
   const avgDaily = validDaily.length ? validDaily.reduce((s, x) => s + x, 0) / validDaily.length : 0;
   return { animals: animals.length, avgWeight, avgGain, avgDaily };
+}
+
+function lotAlerts(data, settings) {
+  const alerts = [];
+  data.lots.forEach((lot) => {
+    const weights = data.weighings
+      .filter((weighing) => weighing.lotId === lot.id && weighing.date)
+      .reduce((groups, weighing) => {
+        const day = groups.get(weighing.date) || { count: 0, total: 0 };
+        day.count += 1;
+        day.total += weighing.weight;
+        groups.set(weighing.date, day);
+        return groups;
+      }, new Map());
+    const weightDates = [...weights.keys()].sort();
+    const currentAnimalCount = animalsInLot(data, lot.id).length;
+    weightDates.forEach((date, index) => {
+      const summary = weights.get(date);
+      if (index > 0) {
+        const previous = weights.get(weightDates[index - 1]);
+        const loss = previous.total / previous.count - summary.total / summary.count;
+        if (loss >= settings.weightLossKg) {
+          alerts.push({
+            key: `loss-${lot.id}-${date}`,
+            lotId: lot.id,
+            lotName: lot.name,
+            date,
+            message: `El promedio bajó ${loss.toFixed(1)} kg.`,
+          });
+        }
+      }
+      if (currentAnimalCount > 0 && summary.count / currentAnimalCount * 100 < settings.coveragePercent) {
+        alerts.push({
+          key: `coverage-${lot.id}-${date}`,
+          lotId: lot.id,
+          lotName: lot.name,
+          date,
+          message: `Se pesó el ${Math.round(summary.count / currentAnimalCount * 100)}% del lote.`,
+        });
+      }
+    });
+
+    const feedDates = [...new Set(data.feedings
+      .filter((feeding) => feeding.lotId === lot.id && feeding.date)
+      .map((feeding) => feeding.date))].sort();
+    feedDates.slice(1).forEach((date, index) => {
+      const gap = daysBetween(feedDates[index], date);
+      if (gap > settings.feedGapDays) {
+        alerts.push({
+          key: `feed-gap-${lot.id}-${date}`,
+          lotId: lot.id,
+          lotName: lot.name,
+          date,
+          message: `${gap} días entre registros de alimentación.`,
+        });
+      }
+    });
+    const lastFeedDate = feedDates.at(-1);
+    if (lastFeedDate) {
+      const today = new Date();
+      const todayDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const staleDays = daysBetween(lastFeedDate, todayDate);
+      if (staleDays > settings.feedGapDays) {
+        alerts.push({
+          key: `feed-stale-${lot.id}-${lastFeedDate}`,
+          lotId: lot.id,
+          lotName: lot.name,
+          date: lastFeedDate,
+          message: `Sin registro de alimentación hace ${staleDays} días.`,
+        });
+      }
+    }
+  });
+  return alerts.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 async function readSpreadsheet(file) {
