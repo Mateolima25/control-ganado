@@ -1197,7 +1197,6 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
 function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit }) {
   const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
-  const [selectedSummaryMonth, setSelectedSummaryMonth] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
   const weightMonths = [...new Set(weights.map((weight) => weight.date?.slice(0, 7)).filter(Boolean))].sort().reverse();
   const dailyWeightAverages = [...weights.reduce((groups, weighing) => {
@@ -1217,10 +1216,6 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     groups.set(date, day);
     return groups;
   }, new Map()).values()].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  const activeSummaryMonth = weightMonths.includes(selectedSummaryMonth) ? selectedSummaryMonth : "";
-  const visibleDailyWeightAverages = activeSummaryMonth
-    ? dailyWeightAverages.filter((day) => day.date.startsWith(`${activeSummaryMonth}-`))
-    : dailyWeightAverages;
   const monthlyWeightAverages = [...weights.reduce((groups, weighing) => {
     const month = weighing.date?.slice(0, 7);
     if (!month) return groups;
@@ -1290,6 +1285,54 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             <Stat icon={<CalendarDays />} label="Ganancia diaria" value={`${stats.avgDaily.toFixed(2)} kg/día`} />
           </div>
 
+          <section className="panel weight-averages">
+            <div className="panel-title">
+              <div><h3>Promedios de peso</h3><span>Promedios calculados a partir de los pesajes del lote</span></div>
+            </div>
+            {monthlyWeightAverages.length > 0 && (
+              <div className="weight-average-group">
+                <h4>Promedio por mes</h4>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Mes</th><th>Pesajes</th><th>Peso promedio</th></tr></thead>
+                    <tbody>{monthlyWeightAverages.map((month) => (
+                      <tr key={month.month}>
+                        <td>{new Date(`${month.month}-01T12:00:00`).toLocaleDateString("es-AR", {
+                          month: "long",
+                          year: "numeric",
+                        })}</td>
+                        <td>{month.count}</td>
+                        <td><b>{(month.total / month.count).toFixed(1)} kg</b></td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {dailyWeightAverages.length > 0 && (
+              <div className="weight-average-group">
+                <h4>Promedio por fecha</h4>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Fecha</th><th>Pesajes</th><th>Peso promedio</th><th>Mínimo</th><th>Máximo</th></tr></thead>
+                    <tbody>{dailyWeightAverages.map((day) => (
+                      <tr key={day.date}>
+                        <td>{formatDate(day.date)}</td>
+                        <td>{day.count}</td>
+                        <td><b>{(day.total / day.count).toFixed(1)} kg</b></td>
+                        <td>{day.min.toFixed(1)} kg</td>
+                        <td>{day.max.toFixed(1)} kg</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {!monthlyWeightAverages.length && !dailyWeightAverages.length && (
+              <Empty icon={<Gauge />} title="Sin pesajes con fecha" text="Importá pesajes con fecha para ver los promedios." />
+            )}
+          </section>
+
           <div className="two-col">
             <section className="panel">
               <div className="panel-title"><h3>Pesos actuales</h3><span>Top 15 animales</span></div>
@@ -1311,45 +1354,6 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             </section>
           </div>
 
-          <section className="panel daily-weights">
-            <div className="panel-title">
-              <div><h3>Promedio de peso por fecha</h3><span>Promedio de los animales pesados cada día</span></div>
-              <div className="daily-weight-controls">
-                <select
-                  aria-label="Filtrar promedios por mes"
-                  value={activeSummaryMonth}
-                  onChange={(event) => setSelectedSummaryMonth(event.target.value)}
-                >
-                  <option value="">Todos los meses</option>
-                  {weightMonths.map((month) => (
-                    <option key={month} value={month}>
-                      {new Date(`${month}-01T12:00:00`).toLocaleDateString("es-AR", {
-                        month: "long",
-                        year: "numeric",
-                      })}
-                    </option>
-                  ))}
-                </select>
-                <span>{visibleDailyWeightAverages.length} fechas</span>
-              </div>
-            </div>
-            {visibleDailyWeightAverages.length ? (
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Fecha</th><th>Pesajes</th><th>Peso promedio</th><th>Mínimo</th><th>Máximo</th></tr></thead>
-                  <tbody>{visibleDailyWeightAverages.map((day) => (
-                    <tr key={day.date}>
-                      <td>{formatDate(day.date)}</td>
-                      <td>{day.count}</td>
-                      <td><b>{(day.total / day.count).toFixed(1)} kg</b></td>
-                      <td>{day.min.toFixed(1)} kg</td>
-                      <td>{day.max.toFixed(1)} kg</td>
-                    </tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            ) : <Empty icon={<Gauge />} title="Sin pesajes con fecha" text="Importá pesajes con fecha para ver el promedio diario." />}
-          </section>
         </>
       )}
 
@@ -1410,24 +1414,6 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             <Empty icon={<FileSpreadsheet />} title="No hay pesajes" text="Importá el Excel/CSV de True-Test." />
           ) : (
             <>
-              <div className="monthly-weights">
-                <h4>Promedio de peso por mes</h4>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Mes</th><th>Pesajes</th><th>Peso promedio</th></tr></thead>
-                    <tbody>{monthlyWeightAverages.map((month) => (
-                      <tr key={month.month}>
-                        <td>{new Date(`${month.month}-01T12:00:00`).toLocaleDateString("es-AR", {
-                          month: "long",
-                          year: "numeric",
-                        })}</td>
-                        <td>{month.count}</td>
-                        <td><b>{(month.total / month.count).toFixed(1)} kg</b></td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              </div>
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Fecha</th><th>Caravana</th><th>Peso</th>{canEdit && <th>Acciones</th>}</tr></thead>
