@@ -1232,6 +1232,15 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     ? weights
     : weights.filter((weight) => weight.date?.startsWith(`${activeWeightMonth}-`));
   const feeds = data.feedings.filter((f) => f.lotId === lot.id);
+  const feedDates = [...new Set(feeds.map((feed) => feed.date).filter(Boolean))].sort();
+  const elapsedDaysByDate = new Map();
+  feedDates.forEach((date, index) => {
+    if (index > 0) elapsedDaysByDate.set(date, daysBetween(feedDates[index - 1], date));
+  });
+  const feedsWithElapsedDays = feeds.map((feed) => ({
+    ...feed,
+    days: feed.days ?? elapsedDaysByDate.get(feed.date) ?? null,
+  }));
   const stats = lotStats(data, lot.id);
 
   const animals = useMemo(() => {
@@ -1480,7 +1489,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Fecha</th><th>Comederos</th><th>Animales</th><th>Comida kg</th><th>Sal</th><th>Bolsas</th><th>Días</th><th>Kg/animal/día</th></tr></thead>
-                <tbody>{feeds.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((f) => {
+                <tbody>{feedsWithElapsedDays.slice().sort((a,b) => (b.date || "").localeCompare(a.date || "")).map((f) => {
                   const perDay = f.animals && f.days ? f.foodKg / f.animals / f.days : 0;
                   return <tr key={f.id}>
                     <td>{formatDate(f.date)}</td>
