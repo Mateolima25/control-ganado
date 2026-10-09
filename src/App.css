@@ -95,6 +95,25 @@ tr:last-child td { border-bottom: 0; }
 .weight-average-group h4 { margin: 0 0 10px; color: #cbd3db; font-size: 14px; }
 .weight-average-group table { min-width: 560px; }
 .help { color: #6f7b87; font-size: 11px; line-height: 1.5; }
+.evolution-view { display: grid; gap: 14px; }
+.evolution-filters { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.evolution-filters label, .evolution-compare label { display: grid; gap: 6px; color: #aab4be; font-size: 11px; }
+.evolution-filters input, .evolution-compare select { min-width: 165px; padding: 9px 10px; border: 1px solid #2d3742; border-radius: 8px; background: #0c1116; color: #e5e7eb; }
+.evolution-filters input:focus, .evolution-compare select:focus { outline: 1px solid #7ee29b; border-color: #7ee29b; }
+.evolution-compare { display: grid; grid-template-columns: minmax(190px, 1fr) repeat(2, minmax(145px, .7fr)) minmax(175px, .8fr); align-items: end; gap: 14px; padding-top: 17px; border-top: 1px solid #252e38; }
+.evolution-compare h4 { margin: 0 0 5px; font-size: 13px; }
+.evolution-compare .help { margin: 0; }
+.comparison-result { display: grid; gap: 5px; }
+.comparison-result span { color: #7e8a96; font-size: 11px; }
+.comparison-result strong { font-size: 18px; }
+.evolution-alerts { padding: 14px 16px; border: 1px solid #6a5230; border-radius: 12px; background: #241e15; color: #edc477; }
+.evolution-alert-heading { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.evolution-alerts ul { display: grid; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+.evolution-alerts li { display: flex; gap: 10px; color: #c6b18a; font-size: 12px; line-height: 1.5; }
+.evolution-alerts li b { color: #edc477; white-space: nowrap; }
+.evolution-charts { align-items: start; }
+.evolution-charts .panel { min-width: 0; }
+.evolution-view .panel-title .secondary { white-space: nowrap; }
 .positive { color: #7ee29b; font-weight: 700; }
 .negative { color: #e87979; font-weight: 700; }
 .empty { padding: 55px 20px; text-align: center; color: #78838f; }
@@ -159,6 +178,11 @@ tr:last-child td { border-bottom: 0; }
   .animal-detail-actions { justify-content: flex-start; }
   .month-delete { width: 100%; }
   .month-delete select { flex: 1; min-width: 0; }
+  .evolution-compare { grid-template-columns: 1fr 1fr; }
+  .evolution-compare > div:first-child, .comparison-result { grid-column: 1 / -1; }
+  .evolution-filters label { flex: 1; min-width: 130px; }
+  .evolution-filters input { min-width: 0; width: 100%; }
+  .evolution-view .panel-title { align-items: flex-start; }
   .weight-preview-modal { max-height: calc(100vh - 24px); padding: 15px; }
   .import-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .weight-preview-table { max-height: 38vh; }

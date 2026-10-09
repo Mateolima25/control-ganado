@@ -3,10 +3,12 @@ import * as XLSX from "xlsx";
 import { supabase } from "./supabase";
 import {
   ArrowRightLeft,
+  AlertTriangle,
   Beef,
   CalendarDays,
   ChevronRight,
   ClipboardList,
+  Download,
   FileSpreadsheet,
   Gauge,
   LayoutDashboard,
@@ -1197,6 +1199,10 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
 function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit }) {
   const [tab, setTab] = useState(initialTab);
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
+  const [evolutionStartDate, setEvolutionStartDate] = useState("");
+  const [evolutionEndDate, setEvolutionEndDate] = useState("");
+  const [comparisonStart, setComparisonStart] = useState("");
+  const [comparisonEnd, setComparisonEnd] = useState("");
   const weights = data.weighings.filter((w) => w.lotId === lot.id);
   const weightMonths = [...new Set(weights.map((weight) => weight.date?.slice(0, 7)).filter(Boolean))].sort().reverse();
   const dailyWeightAverages = [...weights.reduce((groups, weighing) => {
@@ -1242,6 +1248,137 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     days: feed.days ?? elapsedDaysByDate.get(feed.date) ?? null,
   }));
   const stats = lotStats(data, lot.id);
+  const feedByDate = new Map();
+  feedsWithElapsedDays.forEach((feed) => {
+    if (!feed.date) return;
+    const summary = feedByDate.get(feed.date) || {
+      date: feed.date,
+      records: 0,
+      foodKg: 0,
+      bags: 0,
+      animals: null,
+      days: null,
+    };
+    summary.records += 1;
+    summary.foodKg += feed.foodKg || 0;
+    summary.bags += feed.bags || 0;
+    summary.animals ??= feed.animals;
+    summary.days ??= feed.days;
+    feedByDate.set(feed.date, summary);
+  });
+  const weightByDate = new Map(dailyWeightAverages.map((day) => [day.date, day]));
+  const evolutionRows = [...new Set([...weightByDate.keys(), ...feedByDate.keys()])]
+    .sort()
+    .map((date, index, dates) => {
+      const weighing = weightByDate.get(date);
+      const feeding = feedByDate.get(date);
+      const previousWeighing = dates.slice(0, index).reverse()
+        .map((previousDate) => weightByDate.get(previousDate))
+        .find(Boolean);
+      return {
+        date,
+        weighing,
+        feeding,
+        weightChange: weighing && previousWeighing
+          ? weighing.total / weighing.count - previousWeighing.total / previousWeighing.count
+          : null,
+        foodPerAnimalDay: feeding?.animals > 0 && feeding?.days > 0
+          ? feeding.foodKg / feeding.animals / feeding.days
+          : null,
+      };
+    });
+  const filteredEvolutionRows = evolutionRows.filter(({ date }) =>
+    (!evolutionStartDate || date >= evolutionStartDate) &&
+    (!evolutionEndDate || date <= evolutionEndDate)
+  );
+  const comparisonDates = dailyWeightAverages.map((day) => day.date).sort().reverse();
+  const activeComparisonStart = comparisonDates.includes(comparisonStart)
+    ? comparisonStart
+    : comparisonDates[0] || "";
+  const activeComparisonEnd = comparisonDates.includes(comparisonEnd) && comparisonEnd !== activeComparisonStart
+    ? comparisonEnd
+    : comparisonDates.find((date) => date !== activeComparisonStart) || "";
+  const comparisonA = weightByDate.get(activeComparisonStart);
+  const comparisonB = weightByDate.get(activeComparisonEnd);
+  const comparisonDifference = comparisonA && comparisonB
+    ? comparisonB.total / comparisonB.count - comparisonA.total / comparisonA.count
+    : null;
+  const inEvolutionRange = (date) =>
+    (!evolutionStartDate || date >= evolutionStartDate) &&
+    (!evolutionEndDate || date <= evolutionEndDate);
+  const evolutionAlerts = [];
+  evolutionRows.forEach((row) => {
+    if (!inEvolutionRange(row.date)) return;
+    if (row.weightChange !== null && row.weightChange < 0) {
+      evolutionAlerts.push({
+        key: `weight-${row.date}`,
+        date: row.date,
+        message: `El promedio bajó ${Math.abs(row.weightChange).toFixed(1)} kg respecto del pesaje anterior.`,
+      });
+    }
+    if (row.weighing && stats.animals > 0 && row.weighing.count < stats.animals * 0.8) {
+      evolutionAlerts.push({
+        key: `coverage-${row.date}`,
+        date: row.date,
+        message: `Se pesaron ${row.weighing.count} de ${stats.animals} animales actuales (menos del 80%).`,
+      });
+    }
+  });
+  const weighingDates = dailyWeightAverages.map((day) => day.date).sort();
+  weighingDates.slice(1).forEach((date, index) => {
+    const previousDate = weighingDates[index];
+    const hasFeeding = feedDates.some((feedDate) => feedDate > previousDate && feedDate <= date);
+    if (!hasFeeding && inEvolutionRange(date)) {
+      evolutionAlerts.push({
+        key: `feeding-gap-${previousDate}-${date}`,
+        date,
+        message: `No hay registros de alimentación entre ${formatDate(previousDate)} y ${formatDate(date)}.`,
+      });
+    }
+  });
+  const downloadEvolutionReport = () => {
+    const workbook = XLSX.utils.book_new();
+    const evolutionSheet = filteredEvolutionRows.map((row) => ({
+      Fecha: formatDate(row.date),
+      "Animales pesados": row.weighing?.count ?? "",
+      "Peso promedio (kg)": row.weighing ? Number((row.weighing.total / row.weighing.count).toFixed(1)) : "",
+      "Cambio vs pesaje anterior (kg)": row.weightChange === null ? "" : Number(row.weightChange.toFixed(1)),
+      "Comida total (kg)": row.feeding ? Number(row.feeding.foodKg.toFixed(1)) : "",
+      "Animales alimentados": row.feeding?.animals ?? "",
+      "Días transcurridos": row.feeding?.days ?? "",
+      "Comida (kg/animal/día)": row.foodPerAnimalDay === null ? "" : Number(row.foodPerAnimalDay.toFixed(2)),
+    }));
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(evolutionSheet), "Evolución");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(
+      filteredEvolutionRows.filter((row) => row.weighing).map((row) => ({
+        Fecha: formatDate(row.date),
+        "Animales pesados": row.weighing.count,
+        "Peso promedio (kg)": Number((row.weighing.total / row.weighing.count).toFixed(1)),
+        "Peso mínimo (kg)": Number(row.weighing.min.toFixed(1)),
+        "Peso máximo (kg)": Number(row.weighing.max.toFixed(1)),
+      }))
+    ), "Pesajes");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(
+      filteredEvolutionRows.filter((row) => row.feeding).map((row) => ({
+        Fecha: formatDate(row.date),
+        Registros: row.feeding.records,
+        "Comida total (kg)": Number(row.feeding.foodKg.toFixed(1)),
+        Bolsas: Number(row.feeding.bags.toFixed(1)),
+        Animales: row.feeding.animals ?? "",
+        "Días transcurridos": row.feeding.days ?? "",
+        "Kg/animal/día": row.foodPerAnimalDay === null ? "" : Number(row.foodPerAnimalDay.toFixed(2)),
+      }))
+    ), "Alimentación");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet([{
+      Lote: lot.name,
+      "Primera fecha": activeComparisonStart ? formatDate(activeComparisonStart) : "",
+      "Primer promedio (kg)": comparisonA ? Number((comparisonA.total / comparisonA.count).toFixed(1)) : "",
+      "Segunda fecha": activeComparisonEnd ? formatDate(activeComparisonEnd) : "",
+      "Segundo promedio (kg)": comparisonB ? Number((comparisonB.total / comparisonB.count).toFixed(1)) : "",
+      "Diferencia (kg)": comparisonDifference === null ? "" : Number(comparisonDifference.toFixed(1)),
+    }]), "Comparación");
+    XLSX.writeFile(workbook, `evolucion-${normalize(lot.name)}.xlsx`);
+  };
 
   const animals = useMemo(() => {
     return animalsInLot(data, lot.id)
@@ -1287,6 +1424,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         <button className={tab === "weights" ? "active" : ""} onClick={() => setTab("weights")}>Pesajes</button>
         <button className={tab === "averages" ? "active" : ""} onClick={() => setTab("averages")}>Promedios</button>
         <button className={tab === "feed" ? "active" : ""} onClick={() => setTab("feed")}>Alimentación</button>
+        <button className={tab === "evolution" ? "active" : ""} onClick={() => setTab("evolution")}>Evolución</button>
       </div>
 
       {tab === "summary" && (
@@ -1395,6 +1533,120 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             </div>
           )}
         </section>
+      )}
+
+      {tab === "evolution" && (
+        <div className="evolution-view">
+          <section className="panel">
+            <div className="panel-title">
+              <div><h3>Evolución del lote</h3><span>Pesajes y alimentación en una misma línea de tiempo</span></div>
+              <button type="button" className="secondary" onClick={downloadEvolutionReport}>
+                <Download size={16} /> Descargar informe
+              </button>
+            </div>
+            <div className="evolution-filters">
+              <label>Desde<input type="date" value={evolutionStartDate} max={evolutionEndDate || undefined} onChange={(event) => setEvolutionStartDate(event.target.value)} /></label>
+              <label>Hasta<input type="date" value={evolutionEndDate} min={evolutionStartDate || undefined} onChange={(event) => setEvolutionEndDate(event.target.value)} /></label>
+              <button type="button" className="ghost" onClick={() => {
+                setEvolutionStartDate("");
+                setEvolutionEndDate("");
+              }}>Limpiar fechas</button>
+            </div>
+            <div className="evolution-compare">
+              <div>
+                <h4>Comparar pesajes</h4>
+                <p className="help">Compara el promedio de dos fechas registradas.</p>
+              </div>
+              <label>Fecha inicial
+                <select value={activeComparisonStart} onChange={(event) => setComparisonStart(event.target.value)}>
+                  {comparisonDates.map((date) => <option key={date} value={date}>{formatDate(date)}</option>)}
+                </select>
+              </label>
+              <label>Fecha final
+                <select value={activeComparisonEnd} onChange={(event) => setComparisonEnd(event.target.value)}>
+                  {comparisonDates.filter((date) => date !== activeComparisonStart).map((date) => (
+                    <option key={date} value={date}>{formatDate(date)}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="comparison-result">
+                <span>Diferencia de promedio</span>
+                <strong className={comparisonDifference === null ? "" : comparisonDifference >= 0 ? "positive" : "negative"}>
+                  {comparisonDifference === null ? "Sin datos para comparar" : `${comparisonDifference >= 0 ? "+" : ""}${comparisonDifference.toFixed(1)} kg`}
+                </strong>
+              </div>
+            </div>
+          </section>
+
+          {evolutionAlerts.length > 0 && (
+            <section className="evolution-alerts" aria-label="Alertas del lote">
+              <div className="evolution-alert-heading"><AlertTriangle size={18} /><strong>Revisar estos períodos ({evolutionAlerts.length})</strong></div>
+              <ul>{evolutionAlerts.map((alert) => (
+                <li key={alert.key}><b>{formatDate(alert.date)}</b><span>{alert.message}</span></li>
+              ))}</ul>
+            </section>
+          )}
+
+          <div className="two-col evolution-charts">
+            <section className="panel">
+              <div className="panel-title"><div><h3>Peso promedio del lote</h3><span>Promedio por fecha de pesaje</span></div></div>
+              {filteredEvolutionRows.some((row) => row.weighing) ? (
+                <div className="chart"><ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={filteredEvolutionRows.filter((row) => row.weighing).map((row) => ({
+                    ...row,
+                    averageWeight: Number((row.weighing.total / row.weighing.count).toFixed(1)),
+                  }))}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={24} />
+                    <YAxis unit=" kg" />
+                    <Tooltip labelFormatter={formatDate} formatter={(value) => [`${value} kg`, "Promedio"]} />
+                    <Line type="monotone" dataKey="averageWeight" name="Peso promedio" stroke="#7ee29b" strokeWidth={2} dot />
+                  </LineChart>
+                </ResponsiveContainer></div>
+              ) : <Empty icon={<Gauge />} title="Sin pesajes en este período" text="Ajustá el rango de fechas para ver la evolución." />}
+            </section>
+            <section className="panel">
+              <div className="panel-title"><div><h3>Alimentación diaria por animal</h3><span>Kg de comida por animal por día</span></div></div>
+              {filteredEvolutionRows.some((row) => row.foodPerAnimalDay !== null) ? (
+                <div className="chart"><ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={filteredEvolutionRows.filter((row) => row.foodPerAnimalDay !== null)}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={24} />
+                    <YAxis unit=" kg" />
+                    <Tooltip labelFormatter={formatDate} formatter={(value) => [`${value} kg`, "Por animal/día"]} />
+                    <Line type="monotone" dataKey="foodPerAnimalDay" name="Kg/animal/día" stroke="#e9b96e" strokeWidth={2} dot />
+                  </LineChart>
+                </ResponsiveContainer></div>
+              ) : <Empty icon={<Wheat />} title="Sin datos de consumo diario" text="Se necesitan comida, cantidad de animales y días transcurridos." />}
+            </section>
+          </div>
+
+          <section className="panel">
+            <div className="panel-title"><div><h3>Registro cronológico</h3><span>{filteredEvolutionRows.length} fechas en el período seleccionado</span></div></div>
+            {filteredEvolutionRows.length === 0 ? (
+              <Empty icon={<CalendarDays />} title="Sin registros en este período" text="Prueba con otras fechas o limpia el filtro." />
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Fecha</th><th>Animales pesados</th><th>Peso promedio</th><th>Cambio vs. pesaje anterior</th><th>Comida total</th><th>Días</th><th>Kg/animal/día</th></tr></thead>
+                  <tbody>{filteredEvolutionRows.slice().reverse().map((row) => (
+                    <tr key={row.date}>
+                      <td>{formatDate(row.date)}</td>
+                      <td>{row.weighing?.count ?? "-"}</td>
+                      <td>{row.weighing ? `${(row.weighing.total / row.weighing.count).toFixed(1)} kg` : "-"}</td>
+                      <td className={row.weightChange === null ? "" : row.weightChange >= 0 ? "positive" : "negative"}>
+                        {row.weightChange === null ? "-" : `${row.weightChange >= 0 ? "+" : ""}${row.weightChange.toFixed(1)} kg`}
+                      </td>
+                      <td>{row.feeding ? `${row.feeding.foodKg.toFixed(0)} kg` : "-"}</td>
+                      <td>{row.feeding?.days ?? "-"}</td>
+                      <td>{row.foodPerAnimalDay === null ? "-" : `${row.foodPerAnimalDay.toFixed(2)} kg`}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
       )}
 
       {tab === "weights" && (
