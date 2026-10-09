@@ -1237,6 +1237,23 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const visibleWeights = selectedWeightMonth === "all" || !activeWeightMonth
     ? weights
     : weights.filter((weight) => weight.date?.startsWith(`${activeWeightMonth}-`));
+  const exportVisibleWeights = () => {
+    const rows = visibleWeights
+      .slice()
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+      .map((weighing) => ({
+        Fecha: formatDate(weighing.date),
+        Caravana: weighing.recordedCaravana || weighing.caravana,
+        "Peso (kg)": weighing.weight,
+      }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Pesajes");
+    const monthSuffix = selectedWeightMonth === "all"
+      ? "todos-los-meses"
+      : activeWeightMonth || "sin-fecha";
+    XLSX.writeFile(workbook, `pesajes-${normalize(lot.name)}-${monthSuffix}.xlsx`);
+  };
   const feeds = data.feedings.filter((f) => f.lotId === lot.id);
   const feedDates = [...new Set(feeds.map((feed) => feed.date).filter(Boolean))].sort();
   const elapsedDaysByDate = new Map();
@@ -1653,7 +1670,8 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
         <section className="panel">
           <div className="panel-title">
             <div><h3>Historial de pesajes</h3><span>Comparación por número de caravana</span></div>
-            {weightMonths.length > 0 && (
+            <div className="weight-header-actions">
+              {weightMonths.length > 0 && (
               <div className="month-delete">
                 <select
                   aria-label="Filtrar pesajes por mes"
@@ -1676,7 +1694,13 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                   </button>
                 )}
               </div>
-            )}
+              )}
+              {weights.length > 0 && (
+                <button type="button" className="secondary" onClick={exportVisibleWeights}>
+                  <Download size={16} /> Descargar pesajes
+                </button>
+              )}
+            </div>
           </div>
           {weights.length === 0 ? (
             <Empty icon={<FileSpreadsheet />} title="No hay pesajes" text="Importá el Excel/CSV de True-Test." />

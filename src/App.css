@@ -44,6 +44,7 @@ nav button:hover, nav button.active { background: #18201b; color: #8ee6a2; }
 .section-title, .panel-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 13px; }
 .panel-title { flex-wrap: wrap; }
 .section-title h3, .panel-title h3 { margin: 0 0 3px; font-size: 16px; }
+.weight-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .month-delete { display: flex; align-items: center; gap: 8px; }
 .month-delete select { min-width: 145px; background: #171d24; color: #dbe1e7; border: 1px solid #2d3742; border-radius: 8px; padding: 8px 10px; text-transform: capitalize; }
 .month-delete button { border: 1px solid #553237; border-radius: 8px; background: #241719; color: #f08a8a; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; white-space: nowrap; }
@@ -178,6 +179,8 @@ tr:last-child td { border-bottom: 0; }
   .animal-detail-actions { justify-content: flex-start; }
   .month-delete { width: 100%; }
   .month-delete select { flex: 1; min-width: 0; }
+  .weight-header-actions { width: 100%; }
+  .weight-header-actions .month-delete { flex: 1; }
   .evolution-compare { grid-template-columns: 1fr 1fr; }
   .evolution-compare > div:first-child, .comparison-result { grid-column: 1 / -1; }
   .evolution-filters label { flex: 1; min-width: 130px; }
