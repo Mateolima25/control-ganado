@@ -142,6 +142,7 @@ const emptyData = {
   feedings: [],
   movements: [],
   caravanaChanges: [],
+  deaths: [],
 };
 
 function readStored() {
@@ -153,9 +154,10 @@ function readStored() {
       feedings: Array.isArray(stored?.feedings) ? stored.feedings : [],
       movements: Array.isArray(stored?.movements) ? stored.movements : [],
       caravanaChanges: Array.isArray(stored?.caravanaChanges) ? stored.caravanaChanges : [],
+      deaths: Array.isArray(stored?.deaths) ? stored.deaths : [],
     };
   } catch {
-    return { lots: [], weighings: [], feedings: [], movements: [], caravanaChanges: [] };
+    return { lots: [], weighings: [], feedings: [], movements: [], caravanaChanges: [], deaths: [] };
   }
 }
 
@@ -183,6 +185,7 @@ function App() {
     const query = normalize(search.trim());
     if (!query) return [];
     return animalRecords(data)
+      .filter((animal) => !animal.deceased)
       .filter((animal) => animal.caravanaAliases.some((alias) => normalize(alias).includes(query)))
       .slice(0, 8);
   }, [data, search]);
@@ -269,6 +272,7 @@ function App() {
         feedings: Array.isArray(initialData.feedings) ? initialData.feedings : [],
         movements: Array.isArray(initialData.movements) ? initialData.movements : [],
         caravanaChanges: Array.isArray(initialData.caravanaChanges) ? initialData.caravanaChanges : [],
+        deaths: Array.isArray(initialData.deaths) ? initialData.deaths : [],
       };
       if (active) {
         lastSyncedData.current = JSON.stringify(nextData);
@@ -326,6 +330,7 @@ function App() {
         feedings: Array.isArray(sharedState.data.feedings) ? sharedState.data.feedings : [],
         movements: Array.isArray(sharedState.data.movements) ? sharedState.data.movements : [],
         caravanaChanges: Array.isArray(sharedState.data.caravanaChanges) ? sharedState.data.caravanaChanges : [],
+        deaths: Array.isArray(sharedState.data.deaths) ? sharedState.data.deaths : [],
       };
       setData((current) => JSON.stringify(current) === JSON.stringify(nextData) ? current : nextData);
     };
@@ -380,6 +385,7 @@ function App() {
       feedings: prev.feedings.filter((f) => f.lotId !== id),
       movements: prev.movements.filter((m) => m.fromLotId !== id && m.toLotId !== id),
       caravanaChanges: prev.caravanaChanges,
+      deaths: prev.deaths || [],
     }));
     setSelectedLotId(null);
     setPage("lots");
@@ -426,6 +432,52 @@ function App() {
     }));
   };
 
+  const registerDeath = (record) => {
+    if (!isOwner) return false;
+    const animal = animalRecords(data).find((row) => row.caravana === record.caravana);
+    if (!animal || !animal.currentLotId || animal.deceased) {
+      alert("No se encontró un animal activo para registrar.");
+      return false;
+    }
+    if ((data.deaths || []).some((death) => animal.caravanaAliases.includes(death.caravana))) {
+      alert("Esta caravana ya tiene una muerte registrada.");
+      return false;
+    }
+    if (!record.date || (animal.lastEventDate && record.date < animal.lastEventDate)) {
+      alert(`La fecha de muerte no puede ser anterior al último pesaje o traslado (${formatDate(animal.lastEventDate)}).`);
+      return false;
+    }
+    const lot = data.lots.find((row) => row.id === animal.currentLotId);
+    if (!lot || !record.reason.trim()) {
+      alert("Seleccioná el motivo de la muerte y verificá que el lote siga disponible.");
+      return false;
+    }
+
+    setData((prev) => ({
+      ...prev,
+      deaths: [...(prev.deaths || []), {
+        id: crypto.randomUUID(),
+        caravana: animal.caravana,
+        lotId: lot.id,
+        lotName: lot.name,
+        date: record.date,
+        reason: record.reason.trim(),
+      }],
+    }));
+    return true;
+  };
+
+  const deleteDeath = (id) => {
+    if (!isOwner) return;
+    const death = (data.deaths || []).find((row) => row.id === id);
+    if (!death) return;
+    if (!confirm(`¿Eliminar el registro de muerte de la caravana ${death.caravana}? El animal volverá a contarse como activo.`)) return;
+    setData((prev) => ({
+      ...prev,
+      deaths: (prev.deaths || []).filter((row) => row.id !== id),
+    }));
+  };
+
   const deleteWeightsByMonth = (lotId, month) => {
     if (!isOwner) return;
     const monthWeights = data.weighings.filter(
@@ -448,6 +500,10 @@ function App() {
   const moveAnimal = (caravana, toLotId, date) => {
     if (!isOwner) return;
     const animal = animalRecords(data).find((record) => record.caravana === caravana);
+    if (animal?.deceased) {
+      alert("No se puede trasladar un animal con una muerte registrada.");
+      return;
+    }
     if (!animal?.currentLotId || animal.currentLotId === toLotId) return;
     if (animal.lastEventDate && date < animal.lastEventDate) {
       alert(`La fecha del traslado no puede ser anterior al último movimiento o pesaje (${formatDate(animal.lastEventDate)}).`);
@@ -470,6 +526,10 @@ function App() {
     if (!isOwner) return;
     const normalizedNextCaravana = String(nextCaravana || "").trim();
     const animal = animalRecords(data).find((record) => record.caravana === caravana);
+    if (animal?.deceased) {
+      alert("No se puede cambiar la caravana de un animal con una muerte registrada.");
+      return;
+    }
     if (!animal || !normalizedNextCaravana || normalizedNextCaravana === caravana) return;
 
     const normalizedAliases = animal.caravanaAliases.map((alias) => normalize(alias));
@@ -635,6 +695,9 @@ function App() {
           <button className={page === "caravanas" ? "active" : ""} onClick={() => setPage("caravanas")}>
             <Tags size={18} /> Caravanas
           </button>
+          <button className={page === "deaths" ? "active" : ""} onClick={() => setPage("deaths")}>
+            <AlertTriangle size={18} /> Muertes
+          </button>
         </nav>
 
         {isOwner && (
@@ -657,6 +720,7 @@ function App() {
               {page === "comparison" && "Comparativo de lotes"}
               {page === "lots" && "Lotes"}
               {page === "caravanas" && "Caravanas"}
+              {page === "deaths" && "Muertes"}
               {page === "lot" && selectedLot?.name}
               {page === "animal" && `Caravana ${selectedCaravana || ""}`}
             </h1>
@@ -667,6 +731,8 @@ function App() {
                 ? "Administra los lotes y sus pesajes."
                 : page === "caravanas"
                 ? "Seguimiento individual de cada animal, aunque cambie de lote."
+                : page === "deaths"
+                ? "Registro de animales fallecidos y consulta de su historial."
                     : page === "animal"
                     ? "Historial completo de pesajes y lotes de este animal."
                 : page === "comparison"
@@ -731,6 +797,16 @@ function App() {
             data={data}
             search={search}
             goLot={goLot}
+            openCaravana={openCaravana}
+          />
+        )}
+
+        {page === "deaths" && (
+          <Deaths
+            data={data}
+            canEdit={isOwner}
+            onSave={registerDeath}
+            onDelete={deleteDeath}
             openCaravana={openCaravana}
           />
         )}
@@ -838,7 +914,7 @@ function InfoScreen({ title, text, action, actionLabel }) {
 }
 
 function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSettings }) {
-  const currentAnimals = animalRecords(data).filter((animal) => animal.currentLotId);
+  const currentAnimals = animalRecords(data).filter((animal) => animal.currentLotId && !animal.deceased);
   const totalAnimals = currentAnimals.length;
   const avgWeight = currentAnimals.length
     ? currentAnimals.reduce((sum, animal) => sum + animal.currentWeight, 0) / currentAnimals.length
@@ -949,7 +1025,7 @@ function LotComparison({ data, goLot }) {
     .filter((lot) => category === "all" || (lot.category || "Sin categoría") === category)
     .filter((lot) => !lotQuery || normalize(lot.name).includes(normalize(lotQuery)))
     .map((lot) => {
-      const lotAnimals = animals.filter((animal) => animal.currentLotId === lot.id);
+      const lotAnimals = animals.filter((animal) => animal.currentLotId === lot.id && !animal.deceased);
       const measuredAnimals = lotAnimals.map((animal) => {
         const measurements = animal.history.filter((weighing) =>
           weighing.date &&
@@ -1119,9 +1195,10 @@ function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
 
 function Caravanas({ data, search, goLot, openCaravana }) {
   const animals = useMemo(() => animalRecords(data)
+      .filter((animal) => !animal.deceased)
       .filter((animal) => !search || animal.caravanaAliases.some((alias) => normalize(alias).includes(normalize(search))))
       .sort((a, b) => b.currentWeight - a.currentWeight),
-    [data.lots, data.movements, data.weighings, data.caravanaChanges, search]
+    [data.lots, data.movements, data.weighings, data.caravanaChanges, data.deaths, search]
   );
 
   const avgWeight = animals.length
@@ -1177,6 +1254,65 @@ function Caravanas({ data, search, goLot, openCaravana }) {
   );
 }
 
+function Deaths({ data, canEdit, onSave, onDelete, openCaravana }) {
+  const [showModal, setShowModal] = useState(false);
+  const animals = animalRecords(data);
+  const activeAnimals = animals.filter((animal) => animal.currentLotId && !animal.deceased);
+  const deaths = (data.deaths || []).slice().sort((a, b) =>
+    (b.date || "").localeCompare(a.date || "") || (a.caravana || "").localeCompare(b.caravana || "")
+  );
+  const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
+
+  return (
+    <div className="content">
+      <section className="panel">
+        <div className="panel-title">
+          <div><h3>Registro de animales fallecidos</h3><span>Al registrar una muerte, el animal deja de contar como activo y conserva su historial.</span></div>
+          {canEdit && <button type="button" className="primary" onClick={() => setShowModal(true)} disabled={activeAnimals.length === 0}>
+            <Plus size={16} /> Registrar muerte
+          </button>}
+        </div>
+        <div className="stats-grid death-stats">
+          <Stat icon={<AlertTriangle />} label="Muertes registradas" value={deaths.length} />
+          <Stat icon={<Beef />} label="Animales activos" value={activeAnimals.length} />
+        </div>
+        {deaths.length === 0 ? (
+          <Empty icon={<AlertTriangle />} title="No hay muertes registradas" text={activeAnimals.length ? "Usá «Registrar muerte» para guardar un evento." : "Todavía no hay animales activos con pesajes y lote asignado."} />
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Fecha</th><th>Caravana</th><th>Lote</th><th>Motivo</th>{canEdit && <th>Acciones</th>}</tr></thead>
+              <tbody>{deaths.map((death) => (
+                <tr key={death.id}>
+                  <td>{formatDate(death.date)}</td>
+                  <td><button className="link-button" onClick={() => openCaravana(death.caravana, "deaths")}>{death.caravana}</button></td>
+                  <td>{lotNames.get(death.lotId) || death.lotName || "Lote no disponible"}</td>
+                  <td>{death.reason || "-"}</td>
+                  {canEdit && <td className="actions">
+                    <button type="button" className="danger-icon" aria-label={`Eliminar registro de muerte de la caravana ${death.caravana}`} title="Eliminar registro" onClick={() => onDelete(death.id)}>
+                      <Trash2 size={16} />
+                    </button>
+                  </td>}
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+        {canEdit && activeAnimals.length === 0 && <p className="help">No hay animales activos disponibles para registrar una muerte.</p>}
+      </section>
+      {canEdit && showModal && (
+        <DeathModal
+          animals={activeAnimals}
+          onClose={() => setShowModal(false)}
+          onSave={(record) => {
+            if (onSave(record)) setShowModal(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana, canEdit }) {
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showChangeCaravanaModal, setShowChangeCaravanaModal] = useState(false);
@@ -1203,11 +1339,12 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
       toLotName: lotNames.get(movement.toLotId) || "Lote no disponible",
     })),
     ...(animal?.caravanaChanges || []).map((change) => ({ ...change, eventType: "caravanaChange" })),
+    ...(animal?.death ? [{ ...animal.death, eventType: "death" }] : []),
   ].sort((a, b) =>
     (b.date || "").localeCompare(a.date || "") ||
-    ({ weighing: 0, caravanaChange: 1, movement: 2 }[a.eventType] - { weighing: 0, caravanaChange: 1, movement: 2 }[b.eventType])
+    ({ death: 0, weighing: 1, caravanaChange: 2, movement: 3 }[a.eventType] - { death: 0, weighing: 1, caravanaChange: 2, movement: 3 }[b.eventType])
   );
-  const canMove = canEdit && animal?.currentLotId && data.lots.some((lot) => lot.id !== animal.currentLotId);
+  const canMove = canEdit && !animal?.deceased && animal?.currentLotId && data.lots.some((lot) => lot.id !== animal.currentLotId);
 
   return (
     <div className="content">
@@ -1217,10 +1354,18 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
       ) : (
         <>
           <div className="animal-detail-actions">
-            {animal.currentLotId && <button className="link-button" onClick={() => goLot(animal.currentLotId)}>Abrir lote actual: {animal.currentLot}</button>}
-            {canEdit && <button className="secondary" onClick={() => setShowChangeCaravanaModal(true)}><Tags size={16} /> Cambiar caravana</button>}
+            {animal.currentLotId && <button className="link-button" onClick={() => goLot(animal.currentLotId)}>Abrir {animal.deceased ? "lote al fallecer" : "lote actual"}: {animal.deceased ? (lotNames.get(animal.death.lotId) || animal.death.lotName || animal.currentLot) : animal.currentLot}</button>}
+            {canEdit && !animal.deceased && <button className="secondary" onClick={() => setShowChangeCaravanaModal(true)}><Tags size={16} /> Cambiar caravana</button>}
             {canMove && <button className="secondary" onClick={() => setShowMoveModal(true)}><ArrowRightLeft size={16} /> Trasladar de lote</button>}
           </div>
+
+          {animal.death && (
+            <div className="death-notice" role="status">
+              <AlertTriangle size={17} />
+              <b>Animal fallecido</b>
+              <span>{formatDate(animal.death.date)} · {animal.death.reason} · {lotNames.get(animal.death.lotId) || animal.death.lotName || "Lote no disponible"}</span>
+            </div>
+          )}
 
           {animal.caravanaChanges.length > 0 && (
             <div className="caravana-change-notice" role="status">
@@ -1230,9 +1375,9 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
           )}
 
           <div className="stats-grid">
-            <Stat icon={<Beef />} label="Lote actual" value={animal.currentLot} />
+            <Stat icon={<Beef />} label={animal.deceased ? "Lote al fallecer" : "Lote actual"} value={animal.deceased ? (lotNames.get(animal.death.lotId) || animal.death.lotName || animal.currentLot) : animal.currentLot} />
             <Stat icon={<FileSpreadsheet />} label="Pesajes" value={stats.count} />
-            <Stat icon={<Gauge />} label="Peso actual" value={`${stats.currentWeight.toFixed(1)} kg`} />
+            <Stat icon={<Gauge />} label={animal.deceased ? "Último peso" : "Peso actual"} value={`${stats.currentWeight.toFixed(1)} kg`} />
             <Stat icon={<CalendarDays />} label="Ganancia total" value={`${stats.gain >= 0 ? "+" : ""}${stats.gain.toFixed(1)} kg`} />
             <Stat icon={<Gauge />} label="Ganancia diaria" value={`${stats.daily.toFixed(2)} kg/día`} />
             <Stat icon={<CalendarDays />} label="Último pesaje" value={formatDate(history.at(-1)?.date)} />
@@ -1284,6 +1429,13 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
                           {" → "}
                           {event.toLotId && <button className="link-button" onClick={() => goLot(event.toLotId)}>{event.toLotName}</button>}
                         </td>
+                        <td>-</td>
+                      </>
+                    ) : event.eventType === "death" ? (
+                      <>
+                        <td><span className="death-event-tag">Muerte</span></td>
+                        <td>-</td>
+                        <td>{event.reason || "Motivo no especificado"} · {lotNames.get(event.lotId) || event.lotName || "Lote no disponible"}</td>
                         <td>-</td>
                       </>
                     ) : (
@@ -2222,6 +2374,57 @@ function animalStats(rows, caravana) {
   };
 }
 
+function DeathModal({ animals, onClose, onSave }) {
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [caravana, setCaravana] = useState(animals[0]?.caravana || "");
+  const [date, setDate] = useState(todayString);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+  const animal = animals.find((row) => row.caravana === caravana);
+
+  const submit = (event) => {
+    event.preventDefault();
+    if (!animal || !date || !reason.trim()) {
+      setError("Seleccioná el animal y completá la fecha y el motivo.");
+      return;
+    }
+    if (date > todayString) {
+      setError("La fecha de muerte no puede estar en el futuro.");
+      return;
+    }
+    if (animal.lastEventDate && date < animal.lastEventDate) {
+      setError(`La fecha no puede ser anterior al último pesaje o traslado (${formatDate(animal.lastEventDate)}).`);
+      return;
+    }
+    onSave({ caravana, date, reason: reason.trim() });
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>Registrar muerte</h3><span>El animal se descontará de los activos, sin borrar su historial.</span></div>
+          <button type="button" aria-label="Cerrar" onClick={onClose}><X /></button>
+        </div>
+        <label>Caravana
+          <select value={caravana} onChange={(event) => setCaravana(event.target.value)} required>
+            {animals.map((row) => <option key={row.caravana} value={row.caravana}>{row.caravana} · {row.currentLot}</option>)}
+          </select>
+        </label>
+        <label>Lote asociado<input value={animal?.currentLot || ""} readOnly /></label>
+        <label>Fecha de muerte<input type="date" value={date} min={animal?.lastEventDate || undefined} max={todayString} onChange={(event) => setDate(event.target.value)} required /></label>
+        <label>Motivo<input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. Enfermedad, accidente, causa desconocida" required /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
+          <button className="primary" type="submit" disabled={!animal}><AlertTriangle size={16} /> Confirmar muerte</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function resolveCurrentCaravana(changes, caravana) {
   let current = caravana;
   const visited = new Set();
@@ -2302,6 +2505,9 @@ function animalRecords(data) {
       .filter(Boolean)
       .sort()
       .at(-1) || "";
+    const death = (data.deaths || []).find((row) =>
+      caravanaFamily(caravanaChanges, row.caravana).includes(caravana)
+    ) || null;
 
     return {
       ...animalStats(history, caravana),
@@ -2311,13 +2517,15 @@ function animalRecords(data) {
       caravanaAliases: caravanaFamily(caravanaChanges, caravana),
       currentLotId,
       currentLot: lotNames.get(currentLotId) || (currentLotId ? "Lote no disponible" : "-"),
-      lastEventDate,
+      lastEventDate: [lastEventDate, death?.date].filter(Boolean).sort().at(-1) || "",
+      death,
+      deceased: Boolean(death),
     };
   });
 }
 
 function animalsInLot(data, lotId) {
-  return animalRecords(data).filter((animal) => animal.currentLotId === lotId);
+  return animalRecords(data).filter((animal) => animal.currentLotId === lotId && !animal.deceased);
 }
 
 function lotStats(data, lotId) {
