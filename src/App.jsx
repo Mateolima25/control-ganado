@@ -712,7 +712,13 @@ function App() {
         )}
 
         <div className="sidebar-footer">
-          <span>{isOwner ? "Propietario · puede editar" : "Solo lectura"}</span>
+          <div className={`role-tag ${isOwner ? "editor" : "readonly"}`}>
+            <span className="role-dot" />
+            {isOwner ? "Modo editor" : "Modo lectura"}
+          </div>
+          <div className="role-note">
+            {isOwner ? "Puedes editar este establecimiento" : "Vista compartida · solo el propietario puede editar"}
+          </div>
           <button type="button" onClick={signOut}><LogOut size={15} /> Cerrar sesión</button>
         </div>
       </aside>
@@ -932,7 +938,7 @@ function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSett
   const avgDailyGlobal = avgDaily.length
     ? avgDaily.reduce((a, b) => a + b, 0) / avgDaily.length
     : 0;
-  const warnings = lotAlerts(data, alertSettings);
+  const warnings = canEdit ? lotAlerts(data, alertSettings) : [];
 
   return (
     <div className="content">
@@ -952,35 +958,47 @@ function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSett
         <Stat icon={<Wheat />} label="Ganancia diaria promedio" value={`${avgDailyGlobal.toFixed(2)} kg/día`} />
       </div>
 
-      <section className="panel dashboard-alert-settings">
-        <div className="panel-title">
-          <div><h3>Alertas del establecimiento</h3><span>Los umbrales se guardan en este dispositivo</span></div>
-        </div>
-        <div className="alert-settings-grid">
-          <label>Pérdida promedio para alertar (kg)
-            <input type="number" min="0" step="0.1" value={alertSettings.weightLossKg} onChange={(event) => setAlertSettings((current) => ({ ...current, weightLossKg: Math.max(0, Number(event.target.value) || 0) }))} />
-          </label>
-          <label>Cobertura mínima del pesaje (%)
-            <input type="number" min="1" max="100" step="1" value={alertSettings.coveragePercent} onChange={(event) => setAlertSettings((current) => ({ ...current, coveragePercent: Math.min(100, Math.max(1, Number(event.target.value) || 1)) }))} />
-          </label>
-          <label>Máximo de días sin alimentación
-            <input type="number" min="1" step="1" value={alertSettings.feedGapDays} onChange={(event) => setAlertSettings((current) => ({ ...current, feedGapDays: Math.max(1, Number(event.target.value) || 1) }))} />
-          </label>
-        </div>
-        {warnings.length === 0 ? (
-          <p className="help">No hay alertas con los umbrales actuales.</p>
-        ) : (
-          <div className="dashboard-alert-list">
-            <div className="evolution-alert-heading"><AlertTriangle size={17} /><strong>{warnings.length} avisos para revisar</strong></div>
-            {warnings.slice(0, 8).map((warning) => (
-              <button type="button" key={warning.key} onClick={() => goLot(warning.lotId)}>
-                <b>{warning.lotName} · {formatDate(warning.date)}</b><span>{warning.message}</span>
-              </button>
-            ))}
-            {warnings.length > 8 && <span className="help">Y {warnings.length - 8} avisos más.</span>}
+      {!canEdit && (
+        <div className="mode-banner readonly">
+          <AlertTriangle size={17} />
+          <div>
+            <strong>Modo lectura</strong>
+            <span>Estás viendo una vista compartida. Solo el propietario puede editar lotes, pesajes y umbrales.</span>
           </div>
-        )}
-      </section>
+        </div>
+      )}
+
+      {canEdit && (
+        <section className="panel dashboard-alert-settings">
+          <div className="panel-title">
+            <div><h3>Alertas del establecimiento</h3><span>Los umbrales se guardan en este dispositivo</span></div>
+          </div>
+          <div className="alert-settings-grid">
+            <label>Pérdida promedio para alertar (kg)
+              <input type="number" min="0" step="0.1" value={alertSettings.weightLossKg} onChange={(event) => setAlertSettings((current) => ({ ...current, weightLossKg: Math.max(0, Number(event.target.value) || 0) }))} />
+            </label>
+            <label>Cobertura mínima del pesaje (%)
+              <input type="number" min="1" max="100" step="1" value={alertSettings.coveragePercent} onChange={(event) => setAlertSettings((current) => ({ ...current, coveragePercent: Math.min(100, Math.max(1, Number(event.target.value) || 1)) }))} />
+            </label>
+            <label>Máximo de días sin alimentación
+              <input type="number" min="1" step="1" value={alertSettings.feedGapDays} onChange={(event) => setAlertSettings((current) => ({ ...current, feedGapDays: Math.max(1, Number(event.target.value) || 1) }))} />
+            </label>
+          </div>
+          {warnings.length === 0 ? (
+            <p className="help">No hay alertas con los umbrales actuales.</p>
+          ) : (
+            <div className="dashboard-alert-list">
+              <div className="evolution-alert-heading"><AlertTriangle size={17} /><strong>{warnings.length} avisos para revisar</strong></div>
+              {warnings.slice(0, 8).map((warning) => (
+                <button type="button" key={warning.key} onClick={() => goLot(warning.lotId)}>
+                  <b>{warning.lotName} · {formatDate(warning.date)}</b><span>{warning.message}</span>
+                </button>
+              ))}
+              {warnings.length > 8 && <span className="help">Y {warnings.length - 8} avisos más.</span>}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="section">
         <div className="section-title">
@@ -994,6 +1012,7 @@ function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSett
           <div className="lot-grid">
             {data.lots.map((lot) => {
               const s = lotStats(data, lot.id);
+              const history = lotHistoricalWeighingStats(data, lot.id);
               return (
                 <button className="lot-card" key={lot.id} onClick={() => goLot(lot.id)}>
                   <div className="lot-card-top">
@@ -1003,10 +1022,13 @@ function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSett
                   <h3>{lot.name}</h3>
                   <span className="muted">{lot.category || "Sin categoría"}</span>
                   <div className="lot-card-metrics">
-                    <div><b>{s.animals}</b><span>animales</span></div>
-                    <div><b>{s.avgWeight.toFixed(1)} kg</b><span>peso promedio</span></div>
-                    <div><b>{s.avgDaily.toFixed(2)}</b><span>kg/día</span></div>
+                    <div><b>{s.animals}</b><span>actuales</span></div>
+                    <div><b>{s.animals ? `${s.avgWeight.toFixed(1)} kg` : "-"}</b><span>peso actual</span></div>
+                    <div><b>{s.animals ? s.avgDaily.toFixed(2) : "-"}</b><span>kg/día</span></div>
                   </div>
+                  {s.animals === 0 && history.weighings > 0 && (
+                    <span className="lot-history-note">{history.weighings} pesajes históricos · {history.animals} caravanas</span>
+                  )}
                 </button>
               );
             })}
@@ -1172,17 +1194,23 @@ function Lots({ data, goLot, setModal, deleteLot, canEdit }) {
       ) : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Lote</th><th>Categoría</th><th>Animales</th><th>Peso promedio</th><th>Ganancia diaria</th><th></th></tr></thead>
+          <thead><tr><th>Lote</th><th>Categoría</th><th>Animales actuales</th><th>Peso actual promedio</th><th>Ganancia diaria</th><th></th></tr></thead>
             <tbody>
               {data.lots.map((lot) => {
                 const s = lotStats(data, lot.id);
-                return (
-                  <tr key={lot.id}>
-                    <td><button className="link-button" onClick={() => goLot(lot.id)}>{lot.name}</button></td>
-                    <td>{lot.category || "-"}</td>
-                    <td>{s.animals}</td>
-                    <td>{s.avgWeight.toFixed(1)} kg</td>
-                    <td>{s.avgDaily.toFixed(2)} kg/día</td>
+              const history = lotHistoricalWeighingStats(data, lot.id);
+              return (
+                <tr key={lot.id}>
+                  <td>
+                    <button className="link-button" onClick={() => goLot(lot.id)}>{lot.name}</button>
+                    {s.animals === 0 && history.weighings > 0 && (
+                      <span className="lot-history-note">{history.weighings} pesajes históricos · {history.animals} caravanas</span>
+                    )}
+                  </td>
+                  <td>{lot.category || "-"}</td>
+                  <td>{s.animals}</td>
+                  <td>{s.animals ? `${s.avgWeight.toFixed(1)} kg` : "-"}</td>
+                  <td>{s.animals ? `${s.avgDaily.toFixed(2)} kg/día` : "-"}</td>
                     <td className="actions">
                       <button title="Abrir" onClick={() => goLot(lot.id)}><ChevronRight size={17} /></button>
                       {canEdit && <button title="Eliminar" className="danger-icon" onClick={() => deleteLot(lot.id)}><Trash2 size={16} /></button>}
@@ -1697,6 +1725,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     days: feed.days ?? elapsedDaysByDate.get(feed.date) ?? null,
   }));
   const stats = lotStats(data, lot.id);
+  const historicalStats = lotHistoricalWeighingStats(data, lot.id);
   const feedByDate = new Map();
   feedsWithElapsedDays.forEach((feed) => {
     if (!feed.date) return;
@@ -1752,7 +1781,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const comparisonDifference = comparisonA && comparisonB
     ? comparisonB.total / comparisonB.count - comparisonA.total / comparisonA.count
     : null;
-  const evolutionAlerts = lotAlerts(data, alertSettings)
+  const evolutionAlerts = (canEdit ? lotAlerts(data, alertSettings) : [])
     .filter((alert) => alert.lotId === lot.id)
     .filter((alert) =>
       (!evolutionStartDate || alert.date >= evolutionStartDate) &&
@@ -1852,15 +1881,24 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
       {tab === "summary" && (
         <>
           <div className="stats-grid">
-            <Stat icon={<Beef />} label="Animales" value={stats.animals} />
-            <Stat icon={<Gauge />} label="Peso promedio actual" value={`${stats.avgWeight.toFixed(1)} kg`} />
-            <Stat icon={<Gauge />} label="Ganancia promedio" value={`${stats.avgGain.toFixed(1)} kg`} />
-            <Stat icon={<CalendarDays />} label="Ganancia diaria" value={`${stats.avgDaily.toFixed(2)} kg/día`} />
+            <Stat icon={<Beef />} label="Animales actuales" value={stats.animals} />
+            <Stat icon={<Gauge />} label="Peso promedio actual" value={stats.animals ? `${stats.avgWeight.toFixed(1)} kg` : "-"} />
+            <Stat icon={<Gauge />} label="Ganancia promedio" value={stats.animals ? `${stats.avgGain.toFixed(1)} kg` : "-"} />
+            <Stat icon={<CalendarDays />} label="Ganancia diaria" value={stats.animals ? `${stats.avgDaily.toFixed(2)} kg/día` : "-"} />
           </div>
+
+          {stats.animals === 0 && historicalStats.weighings > 0 && (
+            <div className="lot-history-banner">
+              <FileSpreadsheet size={18} />
+              <p>
+                Este lote no tiene animales asignados actualmente. Se conservan {historicalStats.weighings} pesajes históricos de {historicalStats.animals} caravanas; los promedios de abajo corresponden a esos registros.
+              </p>
+            </div>
+          )}
 
           <section className="panel weight-averages">
             <div className="panel-title">
-              <div><h3>Promedios de peso</h3><span>Promedios calculados a partir de los pesajes del lote</span></div>
+              <div><h3>Promedios de peso</h3><span>Historial de pesajes registrado en este lote</span></div>
             </div>
             {monthlyWeightAverages.length > 0 && (
               <div className="weight-average-group">
@@ -1913,7 +1951,13 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                 <div className="chart"><ResponsiveContainer width="100%" height={300}>
                   <BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="caravana" /><YAxis /><Tooltip /><Bar dataKey="peso" /></BarChart>
                 </ResponsiveContainer></div>
-              ) : <Empty icon={<Gauge />} title="Sin pesajes" text="Importá un archivo de True-Test." />}
+              ) : <Empty
+                icon={<Gauge />}
+                title={historicalStats.weighings > 0 ? "Sin animales actuales" : "Sin pesajes"}
+                text={historicalStats.weighings > 0
+                  ? `Hay ${historicalStats.weighings} pesajes históricos de ${historicalStats.animals} caravanas, pero ninguna está asignada actualmente a este lote.`
+                  : "Importá un archivo de True-Test."}
+              />}
             </section>
 
             <section className="panel">
@@ -2589,6 +2633,15 @@ function lotStats(data, lotId) {
   const validDaily = animals.filter((a) => a.days > 0).map((a) => a.daily);
   const avgDaily = validDaily.length ? validDaily.reduce((s, x) => s + x, 0) / validDaily.length : 0;
   return { animals: animals.length, avgWeight, avgGain, avgDaily };
+}
+
+function lotHistoricalWeighingStats(data, lotId) {
+  const weights = data.weighings.filter((weighing) => weighing.lotId === lotId);
+  const caravanaChanges = data.caravanaChanges || [];
+  const caravanas = new Set(weights
+    .filter((weighing) => weighing.caravana)
+    .map((weighing) => caravanaKey(resolveCurrentCaravana(caravanaChanges, weighing.caravana))));
+  return { weighings: weights.length, animals: caravanas.size };
 }
 
 function lotAlerts(data, settings) {
