@@ -1836,6 +1836,19 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
       .filter((a) => !search || a.caravana.toLowerCase().includes(search.toLowerCase()))
       .sort((a, b) => b.currentWeight - a.currentWeight);
   }, [data, lot.id, search]);
+  const historicalAnimals = useMemo(() => animalRecords(data)
+    .map((animal) => {
+      const lotWeights = animal.history
+        .filter((weighing) => weighing.lotId === lot.id)
+        .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+      if (!lotWeights.length || (animal.currentLotId === lot.id && !animal.deceased)) return null;
+      return { ...animal, lotWeights, lastLotWeight: lotWeights[lotWeights.length - 1] };
+    })
+    .filter((animal) => animal && (!search || animal.caravanaAliases.some((alias) =>
+      normalize(alias).includes(normalize(search))
+    )))
+    .sort((a, b) => (b.lastLotWeight.date || "").localeCompare(a.lastLotWeight.date || "")),
+  [data, lot.id, search]);
 
   const chartData = animals.slice(0, 15).map((a) => ({
     caravana: a.caravana.slice(-8),
@@ -1872,6 +1885,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
       <div className="tabs">
         <button className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>Resumen</button>
         <button className={tab === "animals" ? "active" : ""} onClick={() => setTab("animals")}>Animales</button>
+        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>Historial</button>
         <button className={tab === "weights" ? "active" : ""} onClick={() => setTab("weights")}>Pesajes</button>
         <button className={tab === "averages" ? "active" : ""} onClick={() => setTab("averages")}>Promedios</button>
         <button className={tab === "feed" ? "active" : ""} onClick={() => setTab("feed")}>Alimentación</button>
@@ -1893,6 +1907,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
               <p>
                 Este lote no tiene animales asignados actualmente. Se conservan {historicalStats.weighings} pesajes históricos de {historicalStats.animals} caravanas; los promedios de abajo corresponden a esos registros.
               </p>
+              <button type="button" className="ghost" onClick={() => setTab("history")}>Ver historial</button>
             </div>
           )}
 
@@ -1976,9 +1991,9 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
 
       {tab === "animals" && (
         <section className="panel">
-          <div className="panel-title"><h3>Animales por caravana</h3><span>Ganancia e historial completo, incluso al cambiar de lote · {animals.length} encontrados</span></div>
+          <div className="panel-title"><h3>Animales actuales por caravana</h3><span>Animales actualmente asignados a este lote · {animals.length} encontrados</span></div>
           {animals.length === 0 ? (
-            <Empty icon={<Beef />} title="No hay animales" text="Importá un archivo de True-Test." />
+            <Empty icon={<Beef />} title="No hay animales actuales" text="Consulta la pestaña Historial para ver las caravanas que pasaron por este lote y sus pesajes." />
           ) : (
             <div className="table-wrap">
               <table>
@@ -1993,6 +2008,42 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
                     <td className={a.gain >= 0 ? "positive" : "negative"}>{a.gain >= 0 ? "+" : ""}{a.gain.toFixed(1)} kg</td>
                     <td>{a.days}</td>
                     <td>{a.daily.toFixed(2)} kg/día</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === "history" && (
+        <section className="panel">
+          <div className="panel-title">
+            <div><h3>Historial de animales del lote</h3><span>Caravanas con pesajes en este lote que ya no están asignadas aquí · {historicalAnimals.length} encontradas</span></div>
+          </div>
+          <p className="lot-history-description">
+            Los pesos y fechas corresponden al historial de cada animal en {lot.name}. Si fue trasladado, su lote actual aparece aparte.
+          </p>
+          {historicalAnimals.length === 0 ? (
+            <Empty icon={<Beef />} title="Sin animales en el historial" text="Cuando una caravana tenga pesajes en este lote y luego sea trasladada o registrada como fallecida, aparecerá aquí." />
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Caravana</th><th>Pesajes en este lote</th><th>Primer pesaje</th><th>Último pesaje aquí</th><th>Último peso aquí</th><th>Situación actual</th></tr></thead>
+                <tbody>{historicalAnimals.map((animal) => (
+                  <tr key={animal.caravana}>
+                    <td><button className="link-button" onClick={() => openCaravana(animal.caravana, "lot", "history")}>{animal.caravana}</button></td>
+                    <td>{animal.lotWeights.length}</td>
+                    <td>{formatDate(animal.lotWeights[0].date)}</td>
+                    <td>{formatDate(animal.lastLotWeight.date)}</td>
+                    <td>{animal.lastLotWeight.weight.toFixed(1)} kg</td>
+                    <td>
+                      {animal.deceased
+                        ? `Fallecido · ${formatDate(animal.death?.date)}`
+                        : animal.currentLotId
+                          ? <button className="link-button" onClick={() => goLot(animal.currentLotId)}>{animal.currentLot}</button>
+                          : "Fuera de un lote"}
+                    </td>
                   </tr>
                 ))}</tbody>
               </table>

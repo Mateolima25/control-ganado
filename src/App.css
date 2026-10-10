@@ -86,9 +86,11 @@ nav button.active { background: linear-gradient(100deg, rgba(126, 226, 155, .15)
 .lot-card-metrics b { display: block; font-size: 14px; }
 .lot-card-metrics span { color: #76818d; font-size: 10px; }
 .lot-history-note { display: block; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, .12); color: #c5ad7e; font-size: 11px; line-height: 1.5; }
-.lot-history-banner { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid rgba(233, 185, 110, .22); border-radius: 12px; background: linear-gradient(110deg, rgba(95, 71, 36, .2), rgba(21, 26, 31, .9)); color: #edc477; }
+.lot-history-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid rgba(233, 185, 110, .22); border-radius: 12px; background: linear-gradient(110deg, rgba(95, 71, 36, .2), rgba(21, 26, 31, .9)); color: #edc477; }
 .lot-history-banner svg { flex: 0 0 auto; margin-top: 1px; }
-.lot-history-banner p { margin: 0; color: #cfbd99; font-size: 12px; line-height: 1.55; }
+.lot-history-banner p { flex: 1; margin: 0; color: #cfbd99; font-size: 12px; line-height: 1.55; }
+.lot-history-banner .ghost { flex: 0 0 auto; white-space: nowrap; }
+.lot-history-description { margin: 0 0 14px; color: #9ca9b6; font-size: 12px; line-height: 1.55; }
 .table-wrap { overflow-x: auto; border: 1px solid rgba(148, 163, 184, .14); border-radius: 13px; background: linear-gradient(145deg, #121920, #10161c); box-shadow: 0 8px 24px rgba(0,0,0,.1); }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
 th, td { padding: 12px 14px; border-bottom: 1px solid #222b34; text-align: left; font-size: 12px; }
@@ -236,6 +238,9 @@ tr:last-child td { border-bottom: 0; }
   .comparison-shortcut { justify-content: center; }
   .hero { flex-direction: column; align-items: flex-start; }
   .hero { padding: 24px; }
+  .lot-history-banner { align-items: flex-start; flex-wrap: wrap; }
+  .lot-history-banner p { flex-basis: calc(100% - 32px); }
+  .lot-history-banner .ghost { margin-left: 28px; }
   .stats-grid, .lot-grid { grid-template-columns: 1fr; }
   .alert-settings-grid, .comparison-filters { grid-template-columns: 1fr; }
   .lot-actions { width: 100%; flex-wrap: wrap; }
