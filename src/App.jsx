@@ -1025,6 +1025,7 @@ function Dashboard({ data, goLot, setModal, canEdit, alertSettings, setAlertSett
                     <div><b>{s.animals}</b><span>actuales</span></div>
                     <div><b>{s.animals ? `${s.avgWeight.toFixed(1)} kg` : "-"}</b><span>peso actual</span></div>
                     <div><b>{s.animals ? s.avgDaily.toFixed(2) : "-"}</b><span>kg/día</span></div>
+                    <div><b>{s.animalsInWeightRange}</b><span>230–290 kg</span></div>
                   </div>
                   {s.animals === 0 && history.weighings > 0 && (
                     <span className="lot-history-note">{history.weighings} pesajes históricos · {history.animals} caravanas</span>
@@ -1656,6 +1657,9 @@ function WeightImportPreview({ preview, onCancel, onConfirm }) {
 
 function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighing, saveWeighing, saveFeeding, deleteFeeding, deleteWeightsByMonth, deleteLot, setPage, goLot, openCaravana, initialTab, canEdit, alertSettings }) {
   const [tab, setTab] = useState(initialTab);
+  const [showWeightRangeOnly, setShowWeightRangeOnly] = useState(false);
+  const [minimumWeightInput, setMinimumWeightInput] = useState("230");
+  const [maximumWeightInput, setMaximumWeightInput] = useState("290");
   const [selectedWeightMonth, setSelectedWeightMonth] = useState("");
   const [editingWeighing, setEditingWeighing] = useState(null);
   const [editingFeeding, setEditingFeeding] = useState(undefined);
@@ -1724,7 +1728,9 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
     ...feed,
     days: feed.days ?? elapsedDaysByDate.get(feed.date) ?? null,
   }));
-  const stats = lotStats(data, lot.id);
+  const minimumWeight = minimumWeightInput === "" ? null : Number(minimumWeightInput);
+  const maximumWeight = maximumWeightInput === "" ? null : Number(maximumWeightInput);
+  const stats = lotStats(data, lot.id, minimumWeight, maximumWeight);
   const historicalStats = lotHistoricalWeighingStats(data, lot.id);
   const feedByDate = new Map();
   feedsWithElapsedDays.forEach((feed) => {
@@ -1836,6 +1842,11 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
       .filter((a) => !search || a.caravana.toLowerCase().includes(search.toLowerCase()))
       .sort((a, b) => b.currentWeight - a.currentWeight);
   }, [data, lot.id, search]);
+  const weightRangeAnimals = animals.filter((animal) =>
+    (minimumWeight === null || animal.currentWeight >= minimumWeight) &&
+    (maximumWeight === null || animal.currentWeight <= maximumWeight)
+  );
+  const visibleAnimals = showWeightRangeOnly ? weightRangeAnimals : animals;
   const historicalAnimals = useMemo(() => animalRecords(data)
     .map((animal) => {
       const lotWeights = animal.history
@@ -1899,6 +1910,7 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
             <Stat icon={<Gauge />} label="Peso promedio actual" value={stats.animals ? `${stats.avgWeight.toFixed(1)} kg` : "-"} />
             <Stat icon={<Gauge />} label="Ganancia promedio" value={stats.animals ? `${stats.avgGain.toFixed(1)} kg` : "-"} />
             <Stat icon={<CalendarDays />} label="Ganancia diaria" value={stats.animals ? `${stats.avgDaily.toFixed(2)} kg/día` : "-"} />
+            <Stat icon={<Beef />} label={`Animales · ${minimumWeight ?? "sin mínimo"}–${maximumWeight ?? "sin máximo"} kg`} value={stats.animalsInWeightRange} />
           </div>
 
           {stats.animals === 0 && historicalStats.weighings > 0 && (
@@ -1991,14 +2003,23 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
 
       {tab === "animals" && (
         <section className="panel">
-          <div className="panel-title"><h3>Animales actuales por caravana</h3><span>Animales actualmente asignados a este lote · {animals.length} encontrados</span></div>
+          <div className="panel-title">
+            <div><h3>Animales actuales por caravana</h3><span>{stats.animalsInWeightRange} animales entre {minimumWeight ?? "sin mínimo"} y {maximumWeight ?? "sin máximo"} kg · {animals.length} encontrados</span></div>
+            <div className="weight-range-controls">
+              <label>Desde (kg)<input type="number" min="0" step="0.1" value={minimumWeightInput} onChange={(event) => setMinimumWeightInput(event.target.value)} /></label>
+              <label>Hasta (kg)<input type="number" min="0" step="0.1" value={maximumWeightInput} onChange={(event) => setMaximumWeightInput(event.target.value)} /></label>
+              <label className="weight-range-filter"><input type="checkbox" checked={showWeightRangeOnly} onChange={(event) => setShowWeightRangeOnly(event.target.checked)} /> Filtrar lista</label>
+            </div>
+          </div>
           {animals.length === 0 ? (
             <Empty icon={<Beef />} title="No hay animales actuales" text="Consulta la pestaña Historial para ver las caravanas que pasaron por este lote y sus pesajes." />
+          ) : visibleAnimals.length === 0 ? (
+            <Empty icon={<Beef />} title="No hay animales en ese rango" text={`Este lote no tiene animales actuales entre ${minimumWeight ?? "sin mínimo"} y ${maximumWeight ?? "sin máximo"} kg.`} />
           ) : (
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Caravana</th><th>Lote actual</th><th>Pesajes</th><th>Inicial</th><th>Actual</th><th>Ganancia</th><th>Días</th><th>Ganancia diaria</th></tr></thead>
-                <tbody>{animals.map((a) => (
+                <tbody>{visibleAnimals.map((a) => (
                   <tr key={a.caravana}>
                     <td><button className="link-button" onClick={() => openCaravana(a.caravana, "lot", "animals")}>{a.caravana}</button></td>
                     <td>{a.currentLotId ? <button className="link-button" onClick={() => goLot(a.currentLotId)}>{a.currentLot}</button> : a.currentLot}</td>
@@ -2677,13 +2698,17 @@ function animalsInLot(data, lotId) {
   return animalRecords(data).filter((animal) => animal.currentLotId === lotId && !animal.deceased);
 }
 
-function lotStats(data, lotId) {
+function lotStats(data, lotId, minimumWeight = 230, maximumWeight = 290) {
   const animals = animalsInLot(data, lotId);
   const avgWeight = animals.length ? animals.reduce((s, a) => s + a.currentWeight, 0) / animals.length : 0;
+  const animalsInWeightRange = animals.filter((animal) =>
+    (minimumWeight === null || animal.currentWeight >= minimumWeight) &&
+    (maximumWeight === null || animal.currentWeight <= maximumWeight)
+  ).length;
   const avgGain = animals.length ? animals.reduce((s, a) => s + a.gain, 0) / animals.length : 0;
   const validDaily = animals.filter((a) => a.days > 0).map((a) => a.daily);
   const avgDaily = validDaily.length ? validDaily.reduce((s, x) => s + x, 0) / validDaily.length : 0;
-  return { animals: animals.length, avgWeight, avgGain, avgDaily };
+  return { animals: animals.length, animalsInWeightRange, avgWeight, avgGain, avgDaily };
 }
 
 function lotHistoricalWeighingStats(data, lotId) {
@@ -2738,18 +2763,6 @@ function lotAlerts(data, settings) {
     const feedDates = [...new Set(data.feedings
       .filter((feeding) => feeding.lotId === lot.id && feeding.date)
       .map((feeding) => feeding.date))].sort();
-    feedDates.slice(1).forEach((date, index) => {
-      const gap = daysBetween(feedDates[index], date);
-      if (gap > settings.feedGapDays) {
-        alerts.push({
-          key: `feed-gap-${lot.id}-${date}`,
-          lotId: lot.id,
-          lotName: lot.name,
-          date,
-          message: `${gap} días entre registros de alimentación.`,
-        });
-      }
-    });
     const lastFeedDate = feedDates.at(-1);
     if (lastFeedDate) {
       const today = new Date();

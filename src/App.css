@@ -82,9 +82,14 @@ nav button.active { background: linear-gradient(100deg, rgba(126, 226, 155, .15)
 .lot-icon { width: 40px; height: 40px; background: #18241c; color: #7ee29b; }
 .lot-icon.large { width: 48px; height: 48px; }
 .lot-card h3 { margin: 17px 0 3px; }
-.lot-card-metrics { border-top: 1px solid #232c35; margin-top: 16px; padding-top: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.lot-card-metrics { border-top: 1px solid #232c35; margin-top: 16px; padding-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .lot-card-metrics b { display: block; font-size: 14px; }
 .lot-card-metrics span { color: #76818d; font-size: 10px; }
+.weight-range-controls { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
+.weight-range-controls > label:not(.weight-range-filter) { display: grid; gap: 5px; color: #aab4be; font-size: 11px; }
+.weight-range-controls input[type="number"] { width: 92px; padding: 8px 9px; border: 1px solid #2d3742; border-radius: 8px; background: #0c1116; color: #e5e7eb; }
+.weight-range-filter { display: inline-flex; align-items: center; gap: 8px; color: #aab4be; font-size: 12px; white-space: nowrap; }
+.weight-range-filter input { width: 15px; height: 15px; margin: 0; accent-color: #7ee29b; }
 .lot-history-note { display: block; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, .12); color: #c5ad7e; font-size: 11px; line-height: 1.5; }
 .lot-history-banner { display: flex; align-items: center; gap: 10px; margin: 0 0 18px; padding: 13px 15px; border: 1px solid rgba(233, 185, 110, .22); border-radius: 12px; background: linear-gradient(110deg, rgba(95, 71, 36, .2), rgba(21, 26, 31, .9)); color: #edc477; }
 .lot-history-banner svg { flex: 0 0 auto; margin-top: 1px; }
