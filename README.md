@@ -23,6 +23,9 @@ http://localhost:5173
 - Comparar animales por número de caravana.
 - Historial de pesajes.
 - Registrar traslados entre lotes sin agregar un pesaje falso.
+- Registro de campo para celular: muertes, enfermedades/observaciones, tratamientos y traslados, con fecha, lote confirmado, notas y foto opcional.
+- Buscar animales por caravana y adjuntar una foto desde la cámara del teléfono; las fotos se reducen para guardarse con los datos sincronizados.
+- Reconocer automáticamente los números de una caravana fotografiada, con confirmación manual antes de guardar el evento.
 - Cambiar caravana conservando el identificador histórico de cada pesaje.
 - Ganancia total y ganancia diaria.
 - Importar Excel/CSV de alimentación.
@@ -30,6 +33,12 @@ http://localhost:5173
 - Calcular kg de comida por animal por día.
 - Dashboard y gráficos.
 - Datos sincronizados con Supabase y cache local para la cuenta propietaria.
+
+## Identificación desde el celular
+
+La caravana de la foto de referencia muestra un número impreso y no un QR/código de barras visible. En **Campo**, el OCR intenta leer los números de la foto en el propio dispositivo y buscar una caravana activa coincidente. Antes de guardar, se debe confirmar que el animal y el lote sean correctos; la lectura puede fallar si la foto está borrosa, lejos o mal iluminada. También se puede elegir un número detectado o buscarlo manualmente. El primer escaneo necesita conexión a internet para cargar el motor y los datos de reconocimiento; las fotos se procesan en el navegador y no se envían a ese servicio.
+
+El botón negro de la caravana podría contener un chip RFID, pero debe confirmarse con el proveedor. RFID identifica un chip mediante radiofrecuencia y requiere un lector compatible; un teléfono común no puede leer por sí solo todos los chips RFID ganaderos. La lectura RFID se puede integrar más adelante si se conoce el estándar y el lector disponible.
 
 ## Formato de alimentación
 
