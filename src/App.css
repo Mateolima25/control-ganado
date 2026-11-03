@@ -216,6 +216,8 @@ tr:last-child td { border-bottom: 0; }
 .auth-panel .secondary { margin-top: 3px; }
 .sidebar-footer button { display: flex; align-items: center; gap: 6px; margin-top: 10px; padding: 0; border: 0; background: transparent; color: #aab4be; font-size: 12px; }
 .sync-error { margin: 16px 34px 0; padding: 11px 14px; border: 1px solid #553237; border-radius: 8px; background: #241719; color: #f08a8a; font-size: 12px; }
+.sync-status { margin: 12px 34px 0; color: #8e9b91; font-size: 11px; }
+.sync-status.saving { color: #d7ba78; }
 @media (max-width: 1000px) {
   .sidebar { width: 210px; }
   .main { margin-left: 210px; width: calc(100% - 210px); }
@@ -397,4 +399,54 @@ th { color: #aaa; }
 @media (max-width: 760px) {
   .weight-range-controls { width: 100%; }
   .lot-card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.field-page { display: grid; gap: 18px; }
+.field-form { display: grid; gap: 14px; }
+.field-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.field-form .panel-title { margin-bottom: 0; }
+.field-tip { display: flex; align-items: flex-start; gap: 9px; margin: 0; padding: 12px; border: 1px solid #55432e; border-radius: 9px; background: #211d18; color: #d7c6ab; font-size: 12px; line-height: 1.5; }
+.field-tip svg { flex: 0 0 auto; color: var(--honey); }
+.field-label { display: grid; gap: 7px; color: #b8b8b8; font-size: 12px; }
+.field-label input, .field-label select, .field-label textarea { width: 100%; min-height: 42px; padding: 10px 11px; border: 1px solid #3c3c3c; border-radius: 8px; outline: none; background: #111; color: #e7e7e7; }
+.field-label textarea { resize: vertical; }
+.field-label input:focus, .field-label select:focus, .field-label textarea:focus { border-color: var(--copper); }
+.field-animal-card { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px; border: 1px solid #494034; border-radius: 10px; background: #211d18; }
+.field-animal-card > div { display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 2px 8px; flex: 1; min-width: 190px; }
+.field-animal-card > div svg { grid-row: span 2; color: var(--honey); }
+.field-animal-card > div span { color: #aaa; font-size: 12px; }
+.field-photo-row, .field-submit-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.field-photo-picker { position: relative; overflow: hidden; cursor: pointer; }
+.field-photo-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.ocr-progress { display: grid; gap: 6px; color: #d7c6ab; font-size: 12px; }
+.ocr-progress progress { width: 100%; height: 8px; accent-color: var(--copper); }
+.ocr-status { margin: 0; color: #e2b15d; font-size: 12px; }
+.ocr-candidates { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: #c9c1b6; font-size: 12px; }
+.ocr-candidates .secondary { min-height: 36px; padding: 6px 12px; }
+.field-photo-row .help, .field-submit-row .help { display: flex; align-items: center; gap: 5px; }
+.field-submit-row { justify-content: space-between; padding-top: 5px; }
+.field-photo-preview { display: block; width: min(320px, 100%); max-height: 280px; object-fit: cover; border: 1px solid #454545; border-radius: 10px; }
+.field-log .panel-title { margin-bottom: 14px; }
+.field-event-list { display: grid; gap: 9px; }
+.field-event-card { display: flex; align-items: flex-start; gap: 12px; padding: 13px; border: 1px solid #383838; border-radius: 10px; background: #151515; }
+.field-event-icon { display: grid; flex: 0 0 36px; width: 36px; height: 36px; place-items: center; border-radius: 9px; background: #30251d; color: var(--honey); }
+.field-event-icon.death { background: #38211d; color: var(--coral); }
+.field-event-main { flex: 1; min-width: 0; }
+.field-event-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.field-event-heading time, .field-event-main > span { color: #aaa; font-size: 12px; }
+.field-event-main p { margin: 7px 0 0; color: #ddd; font-size: 13px; overflow-wrap: anywhere; }
+.field-event-main p.field-event-notes { color: #aaa; }
+.field-event-photo { flex: 0 0 auto; }
+.field-event-photo img { display: block; width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid #454545; }
+.death-photo-link { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; color: #e2b15d; font-size: 12px; }
+.death-photo-link img { width: 34px; height: 34px; object-fit: cover; border-radius: 5px; vertical-align: middle; }
+.field-form .form-error { margin: 0; }
+@media (max-width: 760px) {
+  .field-form { padding: 16px; }
+  .field-form-grid { grid-template-columns: 1fr; }
+  .field-submit-row { align-items: stretch; flex-direction: column; }
+  .field-submit-row .primary { justify-content: center; min-height: 48px; }
+  .field-event-card { gap: 9px; padding: 10px; }
+  .field-event-photo img { width: 50px; height: 50px; }
+  .field-animal-card { align-items: flex-start; }
 }

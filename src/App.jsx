@@ -6,15 +6,19 @@ import {
   AlertTriangle,
   Beef,
   CalendarDays,
+  Camera,
   ChevronRight,
   ClipboardList,
   Download,
   FileSpreadsheet,
   Gauge,
+  HeartPulse,
   LayoutDashboard,
   LogIn,
   LogOut,
+  MapPin,
   Pencil,
+  Smartphone,
   Tags,
   Plus,
   Search,
@@ -65,6 +69,28 @@ const normalize = (value = "") =>
 
 const cleanCaravana = (value) => String(value ?? "").trim().replace(/\s+/g, "");
 const caravanaKey = (value) => normalize(value);
+
+function caravanaCandidatesFromOcr(recognition, priority = 0) {
+  const candidates = new Map();
+  const collect = (text, confidence = 0, height = 0) => {
+    for (const match of String(text || "").matchAll(/\d{3,10}/g)) {
+      const value = match[0];
+      const score = confidence + height * 2 + priority;
+      const previous = candidates.get(value);
+      if (!previous || score > previous.score) {
+        candidates.set(value, { value, confidence, score });
+      }
+    }
+  };
+
+  (recognition.words || []).forEach((word) => {
+    const height = word.bbox ? Math.max(0, word.bbox.y1 - word.bbox.y0) : 0;
+    collect(word.text, word.confidence || 0, height);
+  });
+  if (candidates.size === 0) collect(recognition.text);
+
+  return [...candidates.values()].sort((a, b) => b.score - a.score);
+}
 
 const numberValue = (value) => {
   if (typeof value === "number") {
@@ -146,6 +172,7 @@ const emptyData = {
   movements: [],
   caravanaChanges: [],
   deaths: [],
+  fieldEvents: [],
 };
 
 function readStored() {
@@ -158,9 +185,10 @@ function readStored() {
       movements: Array.isArray(stored?.movements) ? stored.movements : [],
       caravanaChanges: Array.isArray(stored?.caravanaChanges) ? stored.caravanaChanges : [],
       deaths: Array.isArray(stored?.deaths) ? stored.deaths : [],
+      fieldEvents: Array.isArray(stored?.fieldEvents) ? stored.fieldEvents : [],
     };
   } catch {
-    return { lots: [], weighings: [], feedings: [], movements: [], caravanaChanges: [], deaths: [] };
+    return { lots: [], weighings: [], feedings: [], movements: [], caravanaChanges: [], deaths: [], fieldEvents: [] };
   }
 }
 
@@ -173,6 +201,7 @@ function App() {
   const [dataStatus, setDataStatus] = useState("loading");
   const [dataError, setDataError] = useState("");
   const [syncError, setSyncError] = useState("");
+  const [syncStatus, setSyncStatus] = useState("saved");
   const [page, setPage] = useState("dashboard");
   const [selectedLotId, setSelectedLotId] = useState(null);
   const [selectedCaravana, setSelectedCaravana] = useState(null);
@@ -207,6 +236,7 @@ function App() {
       setDataStatus(nextSession ? "loading" : "idle");
       setDataError("");
       setSyncError("");
+      setSyncStatus("saved");
       lastSyncedData.current = "";
     });
 
@@ -276,6 +306,7 @@ function App() {
         movements: Array.isArray(initialData.movements) ? initialData.movements : [],
         caravanaChanges: Array.isArray(initialData.caravanaChanges) ? initialData.caravanaChanges : [],
         deaths: Array.isArray(initialData.deaths) ? initialData.deaths : [],
+        fieldEvents: Array.isArray(initialData.fieldEvents) ? initialData.fieldEvents : [],
       };
       if (active) {
         lastSyncedData.current = JSON.stringify(nextData);
@@ -302,16 +333,19 @@ function App() {
     if (serialized === lastSyncedData.current) return;
 
     localStorage.setItem(STORAGE_KEY, serialized);
+    setSyncStatus("saving");
     const timeout = setTimeout(async () => {
       const { error } = await supabase
         .from("herd_app_state")
         .upsert({ id: 1, data, updated_at: new Date().toISOString() });
       if (error) {
         setSyncError(error.message);
+        setSyncStatus("error");
         return;
       }
       lastSyncedData.current = serialized;
       setSyncError("");
+      setSyncStatus("saved");
     }, 400);
 
     return () => clearTimeout(timeout);
@@ -334,6 +368,7 @@ function App() {
         movements: Array.isArray(sharedState.data.movements) ? sharedState.data.movements : [],
         caravanaChanges: Array.isArray(sharedState.data.caravanaChanges) ? sharedState.data.caravanaChanges : [],
         deaths: Array.isArray(sharedState.data.deaths) ? sharedState.data.deaths : [],
+        fieldEvents: Array.isArray(sharedState.data.fieldEvents) ? sharedState.data.fieldEvents : [],
       };
       setData((current) => JSON.stringify(current) === JSON.stringify(nextData) ? current : nextData);
     };
@@ -467,6 +502,8 @@ function App() {
         lotName: lot.name,
         date: record.date,
         reason: record.reason.trim(),
+        notes: record.notes?.trim() || "",
+        photo: record.photo || "",
       }],
     }));
     return true;
@@ -502,17 +539,17 @@ function App() {
     }));
   };
 
-  const moveAnimal = (caravana, toLotId, date) => {
-    if (!isOwner) return;
+  const moveAnimal = (caravana, toLotId, date, evidence = {}) => {
+    if (!isOwner) return false;
     const animal = animalRecords(data).find((record) => record.caravana === caravana);
     if (animal?.deceased) {
       alert("No se puede trasladar un animal con una muerte registrada.");
-      return;
+      return false;
     }
-    if (!animal?.currentLotId || animal.currentLotId === toLotId) return;
+    if (!animal?.currentLotId || animal.currentLotId === toLotId) return false;
     if (animal.lastEventDate && date < animal.lastEventDate) {
       alert(`La fecha del traslado no puede ser anterior al último movimiento o pesaje (${formatDate(animal.lastEventDate)}).`);
-      return;
+      return false;
     }
 
     setData((prev) => ({
@@ -523,8 +560,62 @@ function App() {
         fromLotId: animal.currentLotId,
         toLotId,
         date,
+        notes: evidence.notes?.trim() || "",
+        photo: evidence.photo || "",
       }],
     }));
+    return true;
+  };
+
+  const registerFieldEvent = (record) => {
+    if (!isOwner) return false;
+    const animal = animalRecords(data).find((row) =>
+      row.caravana === record.caravana ||
+      row.caravanaAliases.some((alias) => caravanaKey(alias) === caravanaKey(record.caravana))
+    );
+    if (!animal || !animal.currentLotId || animal.deceased) {
+      alert("No se encontró un animal activo para registrar.");
+      return false;
+    }
+    if (!record.date || (animal.lastEventDate && record.date < animal.lastEventDate)) {
+      alert(`La fecha no puede ser anterior al último registro (${formatDate(animal.lastEventDate)}).`);
+      return false;
+    }
+    if (record.type === "death") {
+      return registerDeath({
+        ...record,
+        caravana: animal.caravana,
+        reason: record.detail,
+      });
+    }
+    if (record.type === "movement") {
+      return moveAnimal(animal.caravana, record.toLotId, record.date, record);
+    }
+    if (!record.detail?.trim()) {
+      alert("Ingresá el detalle del evento.");
+      return false;
+    }
+
+    const lot = data.lots.find((row) => row.id === animal.currentLotId);
+    if (!lot) {
+      alert("No se encontró el lote actual del animal.");
+      return false;
+    }
+    setData((prev) => ({
+      ...prev,
+      fieldEvents: [...(prev.fieldEvents || []), {
+        id: crypto.randomUUID(),
+        type: record.type,
+        caravana: animal.caravana,
+        lotId: lot.id,
+        lotName: lot.name,
+        date: record.date,
+        detail: record.detail.trim(),
+        notes: record.notes?.trim() || "",
+        photo: record.photo || "",
+      }],
+    }));
+    return true;
   };
 
   const changeAnimalCaravana = (caravana, nextCaravana, date, reason) => {
@@ -700,6 +791,9 @@ function App() {
           <button className={page === "caravanas" ? "active" : ""} onClick={() => setPage("caravanas")}>
             <Tags size={18} /> Caravanas
           </button>
+          <button className={page === "field" ? "active" : ""} onClick={() => setPage("field")}>
+            <Smartphone size={18} /> Campo
+          </button>
           <button className={page === "deaths" ? "active" : ""} onClick={() => setPage("deaths")}>
             <AlertTriangle size={18} /> Muertes
           </button>
@@ -731,6 +825,7 @@ function App() {
               {page === "comparison" && "Comparativo de lotes"}
               {page === "lots" && "Lotes"}
               {page === "caravanas" && "Caravanas"}
+              {page === "field" && "Registro de campo"}
               {page === "deaths" && "Muertes"}
               {page === "lot" && selectedLot?.name}
               {page === "animal" && `Caravana ${selectedCaravana || ""}`}
@@ -742,6 +837,8 @@ function App() {
                 ? "Administra los lotes y sus pesajes."
                 : page === "caravanas"
                 ? "Seguimiento individual de cada animal, aunque cambie de lote."
+                : page === "field"
+                ? "Identificá el animal y registrá lo ocurrido desde el celular."
                 : page === "deaths"
                 ? "Registro de animales fallecidos y consulta de su historial."
                     : page === "animal"
@@ -783,6 +880,11 @@ function App() {
         </header>
 
         {syncError && <div className="sync-error" role="alert">No se pudo guardar en la nube: {syncError}</div>}
+        {isOwner && dataStatus === "ready" && !syncError && (
+          <div className={`sync-status ${syncStatus}`} role="status" aria-live="polite">
+            {syncStatus === "saving" ? "Guardando cambios en Supabase…" : "Datos sincronizados con Supabase"}
+          </div>
+        )}
 
         {page === "dashboard" && (
           <Dashboard
@@ -819,6 +921,16 @@ function App() {
             onSave={registerDeath}
             onDelete={deleteDeath}
             openCaravana={openCaravana}
+          />
+        )}
+
+        {page === "field" && (
+          <FieldPage
+            data={data}
+            canEdit={isOwner}
+            onSave={registerFieldEvent}
+            openCaravana={openCaravana}
+            goLot={goLot}
           />
         )}
 
@@ -1315,13 +1427,14 @@ function Deaths({ data, canEdit, onSave, onDelete, openCaravana }) {
         ) : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Fecha</th><th>Caravana</th><th>Lote</th><th>Motivo</th>{canEdit && <th>Acciones</th>}</tr></thead>
+              <thead><tr><th>Fecha</th><th>Caravana</th><th>Lote</th><th>Motivo</th><th>Observaciones / respaldo</th>{canEdit && <th>Acciones</th>}</tr></thead>
               <tbody>{deaths.map((death) => (
                 <tr key={death.id}>
                   <td>{formatDate(death.date)}</td>
                   <td><button className="link-button" onClick={() => openCaravana(death.caravana, "deaths")}>{death.caravana}</button></td>
                   <td>{lotNames.get(death.lotId) || death.lotName || "Lote no disponible"}</td>
                   <td>{death.reason || "-"}</td>
+                  <td>{death.notes || "-"}{death.photo && <a className="death-photo-link" href={death.photo} target="_blank" rel="noreferrer"><img src={death.photo} alt={`Respaldo de la muerte de ${death.caravana}`} /> Ver foto</a>}</td>
                   {canEdit && <td className="actions">
                     <button type="button" className="danger-icon" aria-label={`Eliminar registro de muerte de la caravana ${death.caravana}`} title="Eliminar registro" onClick={() => onDelete(death.id)}>
                       <Trash2 size={16} />
@@ -1343,6 +1456,357 @@ function Deaths({ data, canEdit, onSave, onDelete, openCaravana }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [query, setQuery] = useState("");
+  const [caravana, setCaravana] = useState("");
+  const [type, setType] = useState("death");
+  const [date, setDate] = useState(todayString);
+  const [detail, setDetail] = useState("");
+  const [notes, setNotes] = useState("");
+  const [toLotId, setToLotId] = useState("");
+  const [photo, setPhoto] = useState("");
+  const [photoError, setPhotoError] = useState("");
+  const [ocrCandidates, setOcrCandidates] = useState([]);
+  const [ocrStatus, setOcrStatus] = useState("");
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [error, setError] = useState("");
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  const animals = animalRecords(data).filter((animal) => animal.currentLotId && !animal.deceased);
+  const animal = animals.find((row) => row.caravana === caravana);
+  const matchingAnimals = query.trim() && !animal
+    ? animals
+      .filter((row) => row.caravanaAliases.some((alias) => normalize(alias).includes(normalize(query))))
+      .sort((a, b) => {
+        const normalizedQuery = normalize(query);
+        const aExact = a.caravanaAliases.some((alias) => normalize(alias) === normalizedQuery);
+        const bExact = b.caravanaAliases.some((alias) => normalize(alias) === normalizedQuery);
+        return Number(bExact) - Number(aExact) || a.caravana.localeCompare(b.caravana);
+      })
+      .slice(0, 8)
+    : [];
+  const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
+  const events = [
+    ...(data.deaths || []).map((row) => ({
+      ...row,
+      eventType: "death",
+      label: "Muerte",
+      detail: row.reason,
+    })),
+    ...(data.fieldEvents || []).map((row) => ({
+      ...row,
+      eventType: row.type,
+      label: row.type === "treatment" ? "Tratamiento" : "Enfermedad / observación",
+    })),
+    ...(data.movements || []).map((row) => ({
+      ...row,
+      eventType: "movement",
+      label: "Traslado",
+      detail: `${lotNames.get(row.fromLotId) || "Lote anterior"} → ${lotNames.get(row.toLotId) || "Lote no disponible"}`,
+      lotName: lotNames.get(row.toLotId) || "Lote no disponible",
+    })),
+  ].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+  const submit = (event) => {
+    event.preventDefault();
+    setError("");
+    if (!animal) {
+      setError("Buscá y seleccioná una caravana de la lista.");
+      return;
+    }
+    if (!date || date > todayString) {
+      setError("Ingresá una fecha válida que no sea futura.");
+      return;
+    }
+    if (type !== "movement" && !detail.trim()) {
+      setError(type === "death" ? "Ingresá el motivo de la muerte." : "Ingresá el detalle del evento.");
+      return;
+    }
+    if (type === "movement" && (!toLotId || toLotId === animal.currentLotId)) {
+      setError("Seleccioná un lote de destino distinto al lote actual.");
+      return;
+    }
+
+    const saved = onSave({ caravana, type, date, detail, notes, photo, toLotId });
+    if (!saved) return;
+    setType("death");
+    setDate(todayString);
+    setDetail("");
+    setNotes("");
+    setToLotId("");
+    setPhoto("");
+    setQuery("");
+    setCaravana("");
+  };
+
+  const handlePhoto = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setReadingPhoto(true);
+    setPhotoError("");
+    setError("");
+    setOcrCandidates([]);
+    setOcrStatus("Preparando la foto…");
+    setOcrProgress(0);
+    let imageDimensions;
+    try {
+      imageDimensions = await compressFieldPhoto(file);
+      setPhoto(imageDimensions.photo);
+    } catch (photoReadError) {
+      setPhotoError(photoReadError.message);
+      setReadingPhoto(false);
+      setOcrStatus("");
+      return;
+    }
+
+    let worker;
+    try {
+      setOcrStatus("Cargando reconocimiento de texto…");
+      const { createWorker } = await import("tesseract.js");
+      worker = await createWorker("eng", 1, {
+        langPath: "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int",
+        logger: ({ status, progress }) => {
+          setOcrStatus(status === "recognizing text" ? "Leyendo números de la caravana…" : "Preparando reconocimiento…");
+          if (Number.isFinite(progress)) setOcrProgress(Math.round(progress * 100));
+        },
+      });
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "11" });
+      const { data: fullRecognition } = await worker.recognize(file, {}, { blocks: true });
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "8" });
+      const { width, height } = imageDimensions;
+      const { data: tagRecognition } = await worker.recognize(file, {
+        rectangle: {
+          left: Math.round(width * 0.25),
+          top: Math.round(height * 0.5),
+          width: Math.round(width * 0.7),
+          height: Math.round(height * 0.4),
+        },
+      }, { blocks: true });
+      const candidates = [
+        ...caravanaCandidatesFromOcr(tagRecognition, 1000),
+        ...caravanaCandidatesFromOcr(fullRecognition),
+      ].reduce((unique, candidate) => {
+        const existing = unique.find((row) => row.value === candidate.value);
+        if (!existing) unique.push(candidate);
+        else if (candidate.score > existing.score) existing.score = candidate.score;
+        return unique;
+      }, []).sort((a, b) => b.score - a.score);
+      if (candidates.length === 0) {
+        setOcrStatus("");
+        setPhotoError("No pude distinguir los números. Probá acercar la caravana, enfocar y tomar otra foto.");
+        return;
+      }
+
+      setOcrCandidates(candidates);
+      const matchedAnimals = [...new Set(candidates.flatMap((candidate) =>
+        animals
+          .filter((row) => row.caravanaAliases.some((alias) => caravanaKey(alias) === caravanaKey(candidate.value)))
+          .map((row) => row.caravana)
+      ))];
+      if (matchedAnimals.length === 1) {
+        const matchedAnimal = animals.find((row) => row.caravana === matchedAnimals[0]);
+        setCaravana(matchedAnimal.caravana);
+        setQuery(matchedAnimal.caravana);
+        setDate(todayString);
+        setOcrStatus(`Detecté ${matchedAnimal.caravana}. Confirmá que corresponda al animal.`);
+      } else {
+        setCaravana("");
+        setQuery(candidates[0].value);
+        setOcrStatus(matchedAnimals.length > 1
+          ? "Detecté varios animales posibles. Elegí el correcto en la lista."
+          : "Números detectados. Elegí el que corresponde y confirmá el animal.");
+      }
+    } catch (ocrError) {
+      if (!imageDimensions) setPhotoError(ocrError.message);
+      else setPhotoError(`No se pudo reconocer el número: ${ocrError.message}`);
+      setOcrStatus("");
+    } finally {
+      if (worker) await worker.terminate();
+      setReadingPhoto(false);
+    }
+  };
+
+  const chooseOcrCandidate = (candidate) => {
+    const matchedAnimal = animals.find((row) =>
+      row.caravanaAliases.some((alias) => caravanaKey(alias) === caravanaKey(candidate.value))
+    );
+    setCaravana(matchedAnimal?.caravana || "");
+    setQuery(matchedAnimal?.caravana || candidate.value);
+    if (matchedAnimal) setDate(todayString);
+    setError("");
+    setOcrStatus(matchedAnimal
+      ? `Caravana ${matchedAnimal.caravana} seleccionada. Confirmá que corresponda al animal.`
+      : `Detecté ${candidate.value}. Buscá y seleccioná el animal activo.`);
+  };
+
+  return (
+    <div className="content field-page">
+      {canEdit ? (
+        <form className="panel field-form" onSubmit={submit}>
+          <div className="panel-title">
+            <div><h3>Nuevo registro</h3><span>Identificá al animal, confirmá el lote y guardá lo ocurrido.</span></div>
+          </div>
+          <p className="field-tip"><Camera size={16} /> Sacá una foto nítida y la aplicación intentará leer los números impresos. La foto se procesa en este dispositivo; revisá siempre el resultado antes de guardar.</p>
+          <label className="field-label">Caravana
+            <div className="animal-picker">
+              <input
+                type="search"
+                role="combobox"
+                aria-label="Buscar o escribir número de caravana"
+                aria-autocomplete="list"
+                aria-expanded={matchingAnimals.length > 0}
+                aria-controls="field-animal-results"
+                autoComplete="off"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setCaravana("");
+                }}
+                placeholder="Ej. 6169"
+              />
+              {matchingAnimals.length > 0 && (
+                <div id="field-animal-results" className="animal-picker-results" role="listbox">
+                  {matchingAnimals.map((row) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={false}
+                      key={row.caravana}
+                      onClick={() => {
+                        setCaravana(row.caravana);
+                        setQuery(row.caravana);
+                        setError("");
+                        setDate(todayString);
+                      }}
+                    >
+                      <b>{row.caravana}</b><span>{row.currentLot}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {query.trim() && !animal && matchingAnimals.length === 0 && <span className="animal-picker-hint">No hay animales activos que coincidan. Verificá el número o importá un pesaje para darlo de alta.</span>}
+          </label>
+
+          {animal && (
+            <div className="field-animal-card">
+              <div><Beef size={19} /><strong>Caravana {animal.caravana}</strong><span>{animal.currentLot} · {animal.currentWeight.toFixed(1)} kg</span></div>
+              <button type="button" className="link-button" onClick={() => openCaravana(animal.caravana, "field")}>Ver historial</button>
+              <button type="button" className="link-button" onClick={() => goLot(animal.currentLotId)}>Abrir lote</button>
+            </div>
+          )}
+
+          <div className="field-form-grid">
+            <label className="field-label">Tipo de registro
+              <select value={type} onChange={(event) => {
+                setType(event.target.value);
+                setDetail("");
+                setError("");
+              }}>
+                <option value="death">Muerte</option>
+                <option value="illness">Enfermedad / observación</option>
+                <option value="treatment">Tratamiento</option>
+                <option value="movement">Traslado de lote</option>
+              </select>
+            </label>
+            <label className="field-label">Fecha
+              <input type="date" value={date} min={animal?.lastEventDate || undefined} max={todayString} onChange={(event) => setDate(event.target.value)} required />
+            </label>
+          </div>
+
+          {type === "movement" ? (
+            <label className="field-label">Lote de destino
+              <select value={toLotId} onChange={(event) => setToLotId(event.target.value)} required>
+                <option value="">Seleccionar lote</option>
+                {data.lots.filter((lot) => lot.id !== animal?.currentLotId).map((lot) => (
+                  <option value={lot.id} key={lot.id}>{lot.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label className="field-label">{type === "death" ? "Motivo de muerte" : type === "treatment" ? "Tratamiento realizado" : "Enfermedad u observación"}
+              <input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder={type === "death" ? "Ej. enfermedad, accidente, causa desconocida" : type === "treatment" ? "Ej. medicamento y dosis" : "Describí lo observado"} required />
+            </label>
+          )}
+
+          <label className="field-label">Observaciones
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows="3" placeholder="Detalles adicionales (opcional)" />
+          </label>
+          <div className="field-photo-row">
+            <label className="secondary field-photo-picker">
+              <Camera size={17} /> {readingPhoto ? "Leyendo caravana…" : photo ? "Cambiar foto" : "Escanear caravana con cámara"}
+              <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} disabled={readingPhoto} />
+            </label>
+            {photo && <button className="ghost" type="button" onClick={() => {
+              setPhoto("");
+              setOcrCandidates([]);
+              setOcrStatus("");
+              setPhotoError("");
+            }}>Quitar foto</button>}
+            <span className="help">La foto se optimiza y se adjunta como respaldo.</span>
+          </div>
+          {readingPhoto && <div className="ocr-progress" role="status" aria-live="polite"><span>{ocrStatus}</span><progress max="100" value={ocrProgress} /></div>}
+          {ocrStatus && !readingPhoto && <p className="ocr-status" role="status">{ocrStatus}</p>}
+          {ocrCandidates.length > 0 && (
+            <div className="ocr-candidates" aria-label="Números detectados">
+              <span>Números detectados · tocá el que corresponde:</span>
+              {ocrCandidates.map((candidate) => (
+                <button key={candidate.value} type="button" className="secondary" onClick={() => chooseOcrCandidate(candidate)}>
+                  {candidate.value}
+                </button>
+              ))}
+            </div>
+          )}
+          {photoError && <p className="form-error" role="alert">{photoError}</p>}
+          {photo && <img className="field-photo-preview" src={photo} alt="Vista previa del respaldo fotográfico" />}
+          {error && <p className="form-error" role="alert">{error}</p>}
+          <div className="field-submit-row">
+            {animal && <span className="help"><MapPin size={14} /> Lote actual confirmado: {animal.currentLot}</span>}
+            <button type="submit" className="primary" disabled={!animal || readingPhoto}>
+              {type === "death" ? <AlertTriangle size={17} /> : type === "movement" ? <MapPin size={17} /> : <HeartPulse size={17} />}
+              Guardar registro
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="mode-banner readonly">
+          <AlertTriangle size={17} />
+          <div><strong>Modo lectura</strong><span>Podés consultar el registro, pero solo el propietario puede agregar eventos.</span></div>
+        </div>
+      )}
+
+      <section className="panel field-log">
+        <div className="panel-title"><div><h3>Historial de campo</h3><span>{events.length} registros de muertes, salud y traslados</span></div></div>
+        {events.length === 0 ? (
+          <Empty icon={<ClipboardList />} title="Todavía no hay registros de campo" text="Los eventos que cargues aparecerán acá." />
+        ) : (
+          <div className="field-event-list">
+            {events.map((row) => (
+              <article className="field-event-card" key={`${row.eventType}-${row.id}`}>
+                <div className={`field-event-icon ${row.eventType}`}>
+                  {row.eventType === "death" ? <AlertTriangle size={18} /> : row.eventType === "movement" ? <MapPin size={18} /> : <HeartPulse size={18} />}
+                </div>
+                <div className="field-event-main">
+                  <div className="field-event-heading">
+                    <strong>{row.label} · <button type="button" className="link-button" onClick={() => openCaravana(row.caravana, "field")}>{row.caravana}</button></strong>
+                    <time>{formatDate(row.date)}</time>
+                  </div>
+                  <span>{row.lotName || lotNames.get(row.lotId) || "Lote no disponible"}</span>
+                  {row.detail && <p>{row.detail}</p>}
+                  {row.notes && <p className="field-event-notes">{row.notes}</p>}
+                </div>
+                {row.photo && <a className="field-event-photo" href={row.photo} target="_blank" rel="noreferrer"><img src={row.photo} alt={`Foto adjunta al evento de ${row.caravana}`} /></a>}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -1373,10 +1837,11 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
       toLotName: lotNames.get(movement.toLotId) || "Lote no disponible",
     })),
     ...(animal?.caravanaChanges || []).map((change) => ({ ...change, eventType: "caravanaChange" })),
+    ...(animal?.fieldEvents || []).map((fieldEvent) => ({ ...fieldEvent, eventType: "fieldEvent" })),
     ...(animal?.death ? [{ ...animal.death, eventType: "death" }] : []),
   ].sort((a, b) =>
     (b.date || "").localeCompare(a.date || "") ||
-    ({ death: 0, weighing: 1, caravanaChange: 2, movement: 3 }[a.eventType] - { death: 0, weighing: 1, caravanaChange: 2, movement: 3 }[b.eventType])
+    ({ death: 0, fieldEvent: 1, weighing: 2, caravanaChange: 3, movement: 4 }[a.eventType] - { death: 0, fieldEvent: 1, weighing: 2, caravanaChange: 3, movement: 4 }[b.eventType])
   );
   const canMove = canEdit && !animal?.deceased && animal?.currentLotId && data.lots.some((lot) => lot.id !== animal.currentLotId);
 
@@ -1469,7 +1934,14 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
                       <>
                         <td><span className="death-event-tag">Muerte</span></td>
                         <td>-</td>
-                        <td>{event.reason || "Motivo no especificado"} · {lotNames.get(event.lotId) || event.lotName || "Lote no disponible"}</td>
+                        <td>{event.reason || "Motivo no especificado"} · {lotNames.get(event.lotId) || event.lotName || "Lote no disponible"}{event.notes ? <span className="recorded-caravana">{event.notes}</span> : null}</td>
+                        <td>-</td>
+                      </>
+                    ) : event.eventType === "fieldEvent" ? (
+                      <>
+                        <td><span className="caravana-change-tag">{event.type === "treatment" ? "Tratamiento" : "Enfermedad / observación"}</span></td>
+                        <td>-</td>
+                        <td>{event.detail} · {lotNames.get(event.lotId) || event.lotName || "Lote no disponible"}{event.notes ? <span className="recorded-caravana">{event.notes}</span> : null}</td>
                         <td>-</td>
                       </>
                     ) : (
@@ -2478,6 +2950,36 @@ function Empty({ icon, title, text }) {
   return <div className="empty"><div className="empty-icon">{icon}</div><h3>{title}</h3><p>{text}</p></div>;
 }
 
+async function compressFieldPhoto(file) {
+  if (!file.type.startsWith("image/")) throw new Error("Elegí un archivo de imagen.");
+  if (file.size > 12 * 1024 * 1024) throw new Error("La foto debe pesar menos de 12 MB.");
+
+  const source = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("No se pudo leer la foto."));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error("No se pudo abrir la foto."));
+    element.src = source;
+  });
+  const scale = Math.min(1, 1280 / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(image.width * scale);
+  canvas.height = Math.round(image.height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("El navegador no pudo preparar la foto.");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return {
+    photo: canvas.toDataURL("image/jpeg", 0.68),
+    width: image.width,
+    height: image.height,
+  };
+}
+
 function animalStats(rows, caravana) {
   const sorted = rows.slice().sort((a,b) => (a.date || "").localeCompare(b.date || ""));
   const first = sorted[0];
@@ -2666,12 +3168,16 @@ function animalRecords(data) {
       .filter((change) => caravanaKey(resolveCurrentCaravana(caravanaChanges, change.fromCaravana)) === caravanaKey(caravana))
       .slice()
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+    const aliases = caravanaFamily(caravanaChanges, caravana);
+    const fieldEvents = (data.fieldEvents || []).filter((event) =>
+      aliases.some((alias) => caravanaKey(alias) === caravanaKey(event.caravana))
+    );
     const latestWeight = history[history.length - 1];
     const latestMovement = movements[movements.length - 1];
     const movementIsLatest = latestMovement &&
       (!latestWeight || (latestMovement.date || "") >= (latestWeight.date || ""));
     const currentLotId = movementIsLatest ? latestMovement.toLotId : latestWeight?.lotId || null;
-    const lastEventDate = [latestWeight?.date, latestMovement?.date, ...identityChanges.map((change) => change.date)]
+    const lastEventDate = [latestWeight?.date, latestMovement?.date, ...identityChanges.map((change) => change.date), ...fieldEvents.map((event) => event.date)]
       .filter(Boolean)
       .sort()
       .at(-1) || "";
@@ -2684,7 +3190,8 @@ function animalRecords(data) {
       history,
       movements,
       caravanaChanges: identityChanges,
-      caravanaAliases: caravanaFamily(caravanaChanges, caravana),
+      caravanaAliases: aliases,
+      fieldEvents,
       currentLotId,
       currentLot: lotNames.get(currentLotId) || (currentLotId ? "Lote no disponible" : "-"),
       lastEventDate: [lastEventDate, death?.date].filter(Boolean).sort().at(-1) || "",
