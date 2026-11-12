@@ -165,6 +165,36 @@ const daysBetween = (a, b) => {
   return Math.max(0, Math.round(ms / 86400000));
 };
 
+const PAGE_PATHS = {
+  dashboard: "/",
+  comparison: "/comparativo",
+  lots: "/lotes",
+  caravanas: "/caravanas",
+  field: "/campo",
+  deaths: "/muertes",
+  lot: "/lotes",
+  animal: "/caravanas",
+};
+
+function routeFromPath(pathname) {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  const decodeSegment = (segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  };
+  if (path.startsWith("/lotes/")) {
+    return { page: "lot", lotId: decodeSegment(path.slice("/lotes/".length)) };
+  }
+  if (path.startsWith("/caravanas/")) {
+    return { page: "animal", caravana: decodeSegment(path.slice("/caravanas/".length)) };
+  }
+  const page = Object.keys(PAGE_PATHS).find((key) => PAGE_PATHS[key] === path && !["lot", "animal"].includes(key));
+  return { page: page || "dashboard", lotId: null, caravana: null };
+}
+
 const emptyData = {
   lots: [],
   weighings: [],
@@ -202,9 +232,9 @@ function App() {
   const [dataError, setDataError] = useState("");
   const [syncError, setSyncError] = useState("");
   const [syncStatus, setSyncStatus] = useState("saved");
-  const [page, setPage] = useState("dashboard");
-  const [selectedLotId, setSelectedLotId] = useState(null);
-  const [selectedCaravana, setSelectedCaravana] = useState(null);
+  const [page, setCurrentPage] = useState(() => routeFromPath(window.location.pathname).page);
+  const [selectedLotId, setSelectedLotId] = useState(() => routeFromPath(window.location.pathname).lotId);
+  const [selectedCaravana, setSelectedCaravana] = useState(() => routeFromPath(window.location.pathname).caravana);
   const [animalReturnPage, setAnimalReturnPage] = useState("caravanas");
   const [animalReturnTab, setAnimalReturnTab] = useState("summary");
   const [search, setSearch] = useState("");
@@ -393,9 +423,27 @@ function App() {
 
   const signOut = () => supabase?.auth.signOut();
 
+  const navigateToPage = (nextPage, pathOverride) => {
+    const path = pathOverride || PAGE_PATHS[nextPage] || "/";
+    if (window.location.pathname !== path) window.history.pushState({}, "", path);
+    setCurrentPage(nextPage);
+  };
+  const setPage = (nextPage) => navigateToPage(nextPage);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const route = routeFromPath(window.location.pathname);
+      setCurrentPage(route.page);
+      setSelectedLotId(route.lotId);
+      setSelectedCaravana(route.caravana);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
   const goLot = (id) => {
     setSelectedLotId(id);
-    setPage("lot");
+    navigateToPage("lot", `/lotes/${encodeURIComponent(id)}`);
   };
 
   const openCaravana = (caravana, returnPage = "caravanas", returnTab = "summary") => {
@@ -403,7 +451,7 @@ function App() {
     setAnimalReturnPage(returnPage);
     setAnimalReturnTab(returnTab);
     setSearch("");
-    setPage("animal");
+    navigateToPage("animal", `/caravanas/${encodeURIComponent(caravana)}`);
   };
 
   const addLot = (lot) => {
@@ -446,6 +494,39 @@ function App() {
       ...prev,
       weighings: prev.weighings.map((row) => row.id === id ? { ...row, ...changes } : row),
     }));
+  };
+
+  const addAnimalWeighing = (caravana, weight, date) => {
+    if (!isOwner) return false;
+    const animal = animalRecords(data).find((record) => record.caravana === caravana);
+    if (!animal || !animal.currentLotId || animal.deceased) {
+      alert("No se encontró un animal activo para registrar.");
+      return false;
+    }
+    if (!Number.isFinite(weight) || weight <= 0 || !date) {
+      alert("Ingresá una fecha y un peso mayor que cero.");
+      return false;
+    }
+    if (animal.lastEventDate && date < animal.lastEventDate) {
+      alert(`La fecha del pesaje no puede ser anterior al último registro (${formatDate(animal.lastEventDate)}).`);
+      return false;
+    }
+    if (animal.history.some((weighing) => weighing.date === date)) {
+      alert(`Ya existe un pesaje para la caravana ${caravana} en esa fecha.`);
+      return false;
+    }
+    setData((prev) => ({
+      ...prev,
+      weighings: [...prev.weighings, {
+        id: crypto.randomUUID(),
+        caravana: animal.caravana,
+        recordedCaravana: animal.caravana,
+        lotId: animal.currentLotId,
+        date,
+        weight,
+      }],
+    }));
+    return true;
   };
 
   const saveFeeding = (lotId, feeding) => {
@@ -942,6 +1023,7 @@ function App() {
             onBack={() => setPage(animalReturnPage)}
             onMove={moveAnimal}
             onChangeCaravana={changeAnimalCaravana}
+            onAddWeighing={addAnimalWeighing}
             canEdit={isOwner}
           />
         )}
@@ -1811,9 +1893,10 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
   );
 }
 
-function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana, canEdit }) {
+function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana, onAddWeighing, canEdit }) {
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showChangeCaravanaModal, setShowChangeCaravanaModal] = useState(false);
+  const [showWeighingModal, setShowWeighingModal] = useState(false);
   const animal = animalRecords(data).find((record) => record.caravana === caravana);
   const history = animal?.history || [];
   const stats = animalStats(history, caravana);
@@ -1854,6 +1937,7 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
         <>
           <div className="animal-detail-actions">
             {animal.currentLotId && <button className="link-button" onClick={() => goLot(animal.currentLotId)}>Abrir {animal.deceased ? "lote al fallecer" : "lote actual"}: {animal.deceased ? (lotNames.get(animal.death.lotId) || animal.death.lotName || animal.currentLot) : animal.currentLot}</button>}
+            {canEdit && !animal.deceased && <button className="primary" onClick={() => setShowWeighingModal(true)}><Plus size={16} /> Cargar peso</button>}
             {canEdit && !animal.deceased && <button className="secondary" onClick={() => setShowChangeCaravanaModal(true)}><Tags size={16} /> Cambiar caravana</button>}
             {canMove && <button className="secondary" onClick={() => setShowMoveModal(true)}><ArrowRightLeft size={16} /> Trasladar de lote</button>}
           </div>
@@ -1981,6 +2065,15 @@ function AnimalDetail({ data, caravana, goLot, onBack, onMove, onChangeCaravana,
           }}
         />
       )}
+      {showWeighingModal && animal && (
+        <AnimalWeighingModal
+          animal={animal}
+          onClose={() => setShowWeighingModal(false)}
+          onSave={(weight, date) => {
+            if (onAddWeighing(caravana, weight, date)) setShowWeighingModal(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2054,6 +2147,39 @@ function ChangeCaravanaModal({ animal, onClose, onSave }) {
           <button type="button" className="secondary" onClick={onClose}>Cancelar</button>
           <button className="primary" type="submit" disabled={!nextCaravana.trim() || nextCaravana.trim() === animal.caravana}><Tags size={16} /> Confirmar cambio</button>
         </div>
+      </form>
+    </div>
+  );
+}
+
+function AnimalWeighingModal({ animal, onClose, onSave }) {
+  const today = new Date();
+  const todayString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  const [date, setDate] = useState(todayString);
+  const [weight, setWeight] = useState("");
+  const [error, setError] = useState("");
+
+  const submit = (event) => {
+    event.preventDefault();
+    const numericWeight = Number(weight);
+    if (!date || !Number.isFinite(numericWeight) || numericWeight <= 0) {
+      setError("Ingresá una fecha y un peso mayor que cero.");
+      return;
+    }
+    onSave(numericWeight, date);
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <form className="modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div><h3>Cargar peso individual</h3><span>Caravana {animal.caravana} · {animal.currentLot}</span></div>
+          <button type="button" aria-label="Cerrar" onClick={onClose}><X size={19} /></button>
+        </div>
+        <label>Fecha del pesaje<input type="date" min={animal.lastEventDate || undefined} max={todayString} required value={date} onChange={(event) => setDate(event.target.value)} /></label>
+        <label>Peso (kg)<input type="number" min="0.01" step="any" autoFocus required value={weight} onChange={(event) => setWeight(event.target.value)} /></label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <div className="modal-actions"><button type="button" className="secondary" onClick={onClose}>Cancelar</button><button className="primary" type="submit"><Gauge size={16} /> Guardar peso</button></div>
       </form>
     </div>
   );
