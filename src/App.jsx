@@ -1829,8 +1829,12 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
           </label>
           <div className="field-photo-row">
             <label className="secondary field-photo-picker">
-              <Camera size={17} /> {readingPhoto ? "Leyendo caravana…" : photo ? "Cambiar foto" : "Escanear caravana con cámara"}
+              <Camera size={17} /> {readingPhoto ? "Leyendo caravana…" : photo ? "Reemplazar con cámara" : "Tomar foto"}
               <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} disabled={readingPhoto} />
+            </label>
+            <label className="secondary field-photo-picker">
+              <Upload size={17} /> {readingPhoto ? "Leyendo caravana…" : photo ? "Reemplazar desde galería" : "Adjuntar desde galería"}
+              <input type="file" accept="image/*" onChange={handlePhoto} disabled={readingPhoto} />
             </label>
             {photo && <button className="ghost" type="button" onClick={() => {
               setPhoto("");
@@ -1838,7 +1842,7 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
               setOcrStatus("");
               setPhotoError("");
             }}>Quitar foto</button>}
-            <span className="help">La foto se optimiza y se adjunta como respaldo.</span>
+            <span className="help">La foto se optimiza y se adjunta como respaldo; también podés elegirla desde la galería.</span>
           </div>
           {readingPhoto && <div className="ocr-progress" role="status" aria-live="polite"><span>{ocrStatus}</span><progress max="100" value={ocrProgress} /></div>}
           {ocrStatus && !readingPhoto && <p className="ocr-status" role="status">{ocrStatus}</p>}

@@ -24,7 +24,7 @@ http://localhost:5173
 - Historial de pesajes.
 - Registrar traslados entre lotes sin agregar un pesaje falso.
 - Registro de campo para celular: muertes, enfermedades/observaciones, tratamientos y traslados, con fecha, lote confirmado, notas y foto opcional.
-- Buscar animales por caravana y adjuntar una foto desde la cámara del teléfono; las fotos se reducen para guardarse con los datos sincronizados.
+- Buscar animales por caravana y adjuntar una foto desde la cámara o la galería del teléfono; las fotos se reducen para guardarse con los datos sincronizados.
 - Reconocer automáticamente los números de una caravana fotografiada, con confirmación manual antes de guardar el evento.
 - Cambiar caravana conservando el identificador histórico de cada pesaje.
 - Ganancia total y ganancia diaria.
