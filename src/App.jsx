@@ -69,7 +69,18 @@ const normalize = (value = "") =>
 const cleanCaravana = (value) => String(value ?? "").trim().replace(/\s+/g, "");
 const caravanaKey = (value) => normalize(value);
 
-function caravanaCandidatesFromOcr(recognition, priority = 0) {
+function activeAnimalForCaravanaCandidate(animals, value) {
+  const candidateKey = caravanaKey(value).replace(/^0+/, "");
+  const matches = animals.filter((animal) =>
+    animal.caravanaAliases.some((alias) => {
+      const aliasKey = caravanaKey(alias).replace(/^0+/, "");
+      return aliasKey === candidateKey || (candidateKey.length >= 8 && aliasKey.endsWith(candidateKey));
+    })
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function caravanaCandidatesFromOcr(recognition, priority = 0, combineNumericGroups = false) {
   const candidates = new Map();
   const collect = (text, confidence = 0, height = 0) => {
     for (const match of String(text || "").matchAll(/\d{3,10}/g)) {
@@ -88,7 +99,56 @@ function caravanaCandidatesFromOcr(recognition, priority = 0) {
   });
   if (candidates.size === 0) collect(recognition.text);
 
+  if (combineNumericGroups) {
+    const groups = (String(recognition.text || "").match(/\d+/g) || [])
+      .filter((group) => group.length >= 3);
+    for (let start = 0; start < groups.length; start += 1) {
+      for (let end = start + 2; end <= groups.length; end += 1) {
+        const value = groups.slice(start, end).join("").replace(/^0+(?=\d)/, "");
+        if (value.length < 8 || value.length > 15) continue;
+        const confidence = Number(recognition.confidence) || 0;
+        candidates.set(value, {
+          value,
+          confidence,
+          score: confidence + priority + 100,
+        });
+      }
+    }
+  }
+
   return [...candidates.values()].sort((a, b) => b.score - a.score);
+}
+
+function caravanaNumberRectangle(recognition, imageWidth, imageHeight) {
+  const blocks = (recognition.blocks || [])
+    .filter((block) => /\d{3,}/.test(block.text || "") && block.bbox)
+    .sort((a, b) =>
+      (b.bbox.y1 - b.bbox.y0) - (a.bbox.y1 - a.bbox.y0)
+    );
+  const block = blocks[0];
+  if (!block) {
+    return {
+      left: Math.round(imageWidth * 0.25),
+      top: Math.round(imageHeight * 0.35),
+      width: Math.round(imageWidth * 0.7),
+      height: Math.round(imageHeight * 0.55),
+    };
+  }
+
+  const { x0, y0, x1, y1 } = block.bbox;
+  const blockWidth = x1 - x0;
+  const blockHeight = y1 - y0;
+  // El número secundario suele estar impreso encima del bloque de dígitos mayor.
+  const left = Math.max(0, Math.round(x0 - blockHeight * 0.13));
+  const top = Math.max(0, Math.round(y0 - blockHeight * 0.84));
+  const right = Math.min(imageWidth, Math.round(x0 + blockWidth * 1.6));
+  const bottom = Math.min(imageHeight, Math.round(top + blockHeight * 1.925));
+  return {
+    left,
+    top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
 }
 
 const numberValue = (value) => {
@@ -1667,18 +1727,14 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
       });
       await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "11" });
       const { data: fullRecognition } = await worker.recognize(file, {}, { blocks: true });
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "8" });
       const { width, height } = imageDimensions;
+      const rectangle = caravanaNumberRectangle(fullRecognition, width, height);
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "6" });
       const { data: tagRecognition } = await worker.recognize(file, {
-        rectangle: {
-          left: Math.round(width * 0.25),
-          top: Math.round(height * 0.5),
-          width: Math.round(width * 0.7),
-          height: Math.round(height * 0.4),
-        },
+        rectangle,
       }, { blocks: true });
       const candidates = [
-        ...caravanaCandidatesFromOcr(tagRecognition, 1000),
+        ...caravanaCandidatesFromOcr(tagRecognition, 1000, true),
         ...caravanaCandidatesFromOcr(fullRecognition),
       ].reduce((unique, candidate) => {
         const existing = unique.find((row) => row.value === candidate.value);
@@ -1693,17 +1749,16 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
       }
 
       setOcrCandidates(candidates);
-      const matchedAnimals = [...new Set(candidates.flatMap((candidate) =>
-        animals
-          .filter((row) => row.caravanaAliases.some((alias) => caravanaKey(alias) === caravanaKey(candidate.value)))
-          .map((row) => row.caravana)
-      ))];
+      const matchedAnimals = [...new Set(candidates
+        .map((candidate) => activeAnimalForCaravanaCandidate(animals, candidate.value))
+        .filter(Boolean)
+        .map((animal) => animal.caravana))];
       if (matchedAnimals.length === 1) {
         const matchedAnimal = animals.find((row) => row.caravana === matchedAnimals[0]);
         setCaravana(matchedAnimal.caravana);
         setQuery(matchedAnimal.caravana);
         setDate(todayString);
-        setOcrStatus(`Detecté ${matchedAnimal.caravana}. Confirmá que corresponda al animal.`);
+        setOcrStatus(`Detecté y vinculé ${matchedAnimal.caravana}. Confirmá que corresponda al animal.`);
       } else {
         setCaravana("");
         setQuery(candidates[0].value);
@@ -1722,9 +1777,7 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
   };
 
   const chooseOcrCandidate = (candidate) => {
-    const matchedAnimal = animals.find((row) =>
-      row.caravanaAliases.some((alias) => caravanaKey(alias) === caravanaKey(candidate.value))
-    );
+    const matchedAnimal = activeAnimalForCaravanaCandidate(animals, candidate.value);
     setCaravana(matchedAnimal?.caravana || "");
     setQuery(matchedAnimal?.caravana || candidate.value);
     if (matchedAnimal) setDate(todayString);
