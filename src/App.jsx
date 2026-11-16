@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import { supabase } from "./supabase";
 import {
   ArrowRightLeft,
@@ -139,8 +138,12 @@ const dateValue = (value) => {
   if (!value) return null;
   if (value instanceof Date && !isNaN(value)) return value.toISOString().slice(0, 10);
   if (typeof value === "number") {
-    const d = XLSX.SSF.parse_date_code(value);
-    if (d) return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`;
+    const excelDay = Math.floor(value);
+    if (excelDay === 60) return "1900-02-29";
+    const date = new Date(Date.UTC(1899, 11, 30) + excelDay * 86400000);
+    if (!isNaN(date)) {
+      return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+    }
   }
   const s = String(value).trim();
   const match = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
@@ -204,6 +207,9 @@ const emptyData = {
   deaths: [],
   fieldEvents: [],
 };
+
+const animalRecordsCache = new WeakMap();
+const animalsByLotCache = new WeakMap();
 
 function readStored() {
   try {
@@ -1309,7 +1315,8 @@ function LotComparison({ data, goLot }) {
         (maximumWeight === "" || row.avgWeight <= Number(maximumWeight));
     });
 
-  const exportComparison = () => {
+  const exportComparison = async () => {
+    const XLSX = await import("xlsx");
     const worksheet = XLSX.utils.json_to_sheet(rows.map((row) => ({
       Lote: row.lot.name,
       Categoría: row.lot.category || "Sin categoría",
@@ -2299,7 +2306,8 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
   const visibleWeights = selectedWeightMonth === "all" || !activeWeightMonth
     ? weights
     : weights.filter((weight) => weight.date?.startsWith(`${activeWeightMonth}-`));
-  const exportVisibleWeights = () => {
+  const exportVisibleWeights = async () => {
+    const XLSX = await import("xlsx");
     const rows = visibleWeights
       .slice()
       .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
@@ -2391,7 +2399,8 @@ function LotDetail({ data, lot, search, importWeights, importFeed, deleteWeighin
       (!evolutionStartDate || alert.date >= evolutionStartDate) &&
       (!evolutionEndDate || alert.date <= evolutionEndDate)
     );
-  const downloadEvolutionReport = () => {
+  const downloadEvolutionReport = async () => {
+    const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
     const evolutionSheet = filteredEvolutionRows.map((row) => ({
       Fecha: formatDate(row.date),
@@ -3259,6 +3268,9 @@ function caravanaFamily(changes, caravana) {
 }
 
 function animalRecords(data) {
+  const cachedRecords = animalRecordsCache.get(data);
+  if (cachedRecords) return cachedRecords;
+
   const weighingGroups = new Map();
   const movementGroups = new Map();
   const lotNames = new Map(data.lots.map((lot) => [lot.id, lot.name]));
@@ -3279,7 +3291,7 @@ function animalRecords(data) {
   });
 
   const caravanas = new Set([...weighingGroups.keys(), ...movementGroups.keys()]);
-  return [...caravanas].map((caravana) => {
+  const records = [...caravanas].map((caravana) => {
     const history = (weighingGroups.get(caravana) || [])
       .slice()
       .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
@@ -3325,10 +3337,27 @@ function animalRecords(data) {
       deceased: Boolean(death),
     };
   });
+  animalRecordsCache.set(data, records);
+  return records;
+}
+
+function animalsByLot(data) {
+  const cachedAnimals = animalsByLotCache.get(data);
+  if (cachedAnimals) return cachedAnimals;
+
+  const animals = new Map();
+  animalRecords(data).forEach((animal) => {
+    if (!animal.currentLotId || animal.deceased) return;
+    const lotAnimals = animals.get(animal.currentLotId) || [];
+    lotAnimals.push(animal);
+    animals.set(animal.currentLotId, lotAnimals);
+  });
+  animalsByLotCache.set(data, animals);
+  return animals;
 }
 
 function animalsInLot(data, lotId) {
-  return animalRecords(data).filter((animal) => animal.currentLotId === lotId && !animal.deceased);
+  return animalsByLot(data).get(lotId) || [];
 }
 
 function lotStats(data, lotId, minimumWeight = 230, maximumWeight = 290) {
@@ -3416,6 +3445,7 @@ function lotAlerts(data, settings) {
 }
 
 async function readSpreadsheet(file) {
+  const XLSX = await import("xlsx");
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type: "array", cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
