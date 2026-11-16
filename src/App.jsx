@@ -1726,11 +1726,11 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
         },
       });
       await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "11" });
-      const { data: fullRecognition } = await worker.recognize(file, {}, { blocks: true });
+      const { data: fullRecognition } = await worker.recognize(imageDimensions.photo, {}, { blocks: true });
       const { width, height } = imageDimensions;
       const rectangle = caravanaNumberRectangle(fullRecognition, width, height);
       await worker.setParameters({ tessedit_char_whitelist: "0123456789", tessedit_pageseg_mode: "6" });
-      const { data: tagRecognition } = await worker.recognize(file, {
+      const { data: tagRecognition } = await worker.recognize(imageDimensions.photo, {
         rectangle,
       }, { blocks: true });
       const candidates = [
