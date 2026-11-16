@@ -1829,7 +1829,7 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
           </label>
           <div className="field-photo-row">
             <label className="secondary field-photo-picker">
-              <Camera size={17} /> {readingPhoto ? "Leyendo caravana…" : photo ? "Reemplazar con cámara" : "Tomar foto"}
+              <Camera size={17} /> {readingPhoto ? "Leyendo caravana…" : photo ? "Cambiar foto" : "Escanear caravana con cámara"}
               <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} disabled={readingPhoto} />
             </label>
             <label className="secondary field-photo-picker">
