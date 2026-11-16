@@ -69,6 +69,12 @@ const normalize = (value = "") =>
 const cleanCaravana = (value) => String(value ?? "").trim().replace(/\s+/g, "");
 const caravanaKey = (value) => normalize(value);
 
+function readableErrorMessage(error) {
+  if (typeof error === "string") return error;
+  if (typeof error?.message === "string") return error.message;
+  return "Error desconocido";
+}
+
 function activeAnimalForCaravanaCandidate(animals, value) {
   const candidateKey = caravanaKey(value).replace(/^0+/, "");
   const matches = animals.filter((animal) =>
@@ -1708,7 +1714,7 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
       imageDimensions = await compressFieldPhoto(file);
       setPhoto(imageDimensions.photo);
     } catch (photoReadError) {
-      setPhotoError(photoReadError.message);
+      setPhotoError(readableErrorMessage(photoReadError));
       setReadingPhoto(false);
       setOcrStatus("");
       return;
@@ -1767,8 +1773,8 @@ function FieldPage({ data, canEdit, onSave, openCaravana, goLot }) {
           : "Números detectados. Elegí el que corresponde y confirmá el animal.");
       }
     } catch (ocrError) {
-      if (!imageDimensions) setPhotoError(ocrError.message);
-      else setPhotoError(`No se pudo reconocer el número: ${ocrError.message}`);
+      if (!imageDimensions) setPhotoError(readableErrorMessage(ocrError));
+      else setPhotoError(`No se pudo reconocer el número: ${readableErrorMessage(ocrError)}`);
       setOcrStatus("");
     } finally {
       if (worker) await worker.terminate();
@@ -3167,8 +3173,8 @@ async function compressFieldPhoto(file) {
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   return {
     photo: canvas.toDataURL("image/jpeg", 0.68),
-    width: image.width,
-    height: image.height,
+    width: canvas.width,
+    height: canvas.height,
   };
 }
 
